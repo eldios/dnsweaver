@@ -215,9 +215,12 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 }
 
 // Ping checks connectivity to the Cloudflare API.
-// Uses the /user/tokens/verify endpoint which is lightweight.
+// Lists a single zone rather than calling /user/tokens/verify: that endpoint
+// only accepts user-owned tokens and rejects account-scoped ones, so a token
+// holding exactly the Zone.DNS permissions this provider needs fails it while
+// every real operation succeeds.
 func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.doRequest(ctx, http.MethodGet, "/user/tokens/verify", nil)
+	_, err := c.doRequest(ctx, http.MethodGet, "/zones?per_page=1", nil)
 	if err != nil {
 		return fmt.Errorf("ping failed: %w", err)
 	}
