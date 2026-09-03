@@ -1401,3 +1401,38 @@ func TestCloudflareRecordMatches_MXAndNS(t *testing.T) {
 		})
 	}
 }
+
+func TestListedTXTContent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"quoted value", `"protonmail-verification=abc123"`, "protonmail-verification=abc123"},
+		{"unquoted value", "protonmail-verification=abc123", "protonmail-verification=abc123"},
+		{"split long value", `"v=DKIM1; k=rsa; p=MIIB" "IjANBgkq"`, "v=DKIM1; k=rsa; p=MIIBIjANBgkq"},
+		{"escaped quote", `"say \"hi\""`, `say "hi"`},
+		{"unterminated", `"unterminated`, `"unterminated`},
+		{"trailing quote only", `unterminated"`, `unterminated"`},
+		{"a lone quote", `"`, `"`},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := listedTXTContent("example.com", tt.input)
+			if err != nil || got != tt.want {
+				t.Errorf("listedTXTContent(%q) = %q, %v; want %q", tt.input, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCloudflareRecordMatches_QuotedTXT(t *testing.T) {
+	record := provider.Record{Hostname: "example.com", Type: provider.RecordTypeTXT, Target: "v=spf1 -all"}
+	if !cloudflareRecordMatches(dnsRecord{Name: "example.com", Type: "TXT", Content: `"v=spf1 -all"`}, record) {
+		t.Error("quoted TXT read back did not match its declared value")
+	}
+	if cloudflareRecordMatches(dnsRecord{Name: "example.com", Type: "TXT", Content: `"v=spf1 ~all"`}, record) {
+		t.Error("a different TXT value matched")
+	}
+}
