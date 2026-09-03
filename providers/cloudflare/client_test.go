@@ -61,7 +61,7 @@ func TestClient_WithAPIEndpoint(t *testing.T) {
 
 func TestClient_Ping_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/user/tokens/verify" {
+		if r.URL.Path != "/zones" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 
@@ -71,9 +71,8 @@ func TestClient_Ping_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(successResponse(map[string]interface{}{
-			"id":     "token-id",
-			"status": "active",
+		_ = json.NewEncoder(w).Encode(successResponse([]map[string]interface{}{
+			{"id": "zone-id", "name": "example.com"},
 		}))
 	}))
 	defer server.Close()
