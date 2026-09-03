@@ -120,6 +120,11 @@ func (d *DNSWeaver) Extract(ctx context.Context, w workload.Workload) ([]source.
 					Weight:   e.SRV.Weight,
 				}
 			}
+			if e.MX != nil {
+				h.RecordHints.MX = &source.MXHints{
+					Preference: e.MX.Preference,
+				}
+			}
 		}
 
 		hostnames = append(hostnames, h)

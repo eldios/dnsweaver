@@ -56,6 +56,8 @@ func NewMockProvider(name string) *MockProvider {
 				provider.RecordTypeCNAME,
 				provider.RecordTypeSRV,
 				provider.RecordTypeTXT,
+				provider.RecordTypeMX,
+				provider.RecordTypeNS,
 			},
 		},
 		records: make([]provider.Record, 0),

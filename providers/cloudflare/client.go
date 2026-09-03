@@ -61,14 +61,15 @@ type zonesResponse struct {
 
 // dnsRecord represents a DNS record from the Cloudflare API.
 type dnsRecord struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Name    string         `json:"name"`
-	Content string         `json:"content"`
-	TTL     int            `json:"ttl"`
-	Proxied bool           `json:"proxied"`
-	ZoneID  string         `json:"zone_id"`
-	Data    *srvRecordData `json:"data,omitempty"` // For SRV records
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	Name     string         `json:"name"`
+	Content  string         `json:"content"`
+	TTL      int            `json:"ttl"`
+	Proxied  bool           `json:"proxied"`
+	ZoneID   string         `json:"zone_id"`
+	Data     *srvRecordData `json:"data,omitempty"`     // For SRV records
+	Priority *uint16        `json:"priority,omitempty"` // For MX records
 }
 
 // srvRecordData contains the structured data for SRV records in Cloudflare.
@@ -89,12 +90,13 @@ type dnsRecordsResponse struct {
 
 // createRecordRequest is the request body for creating a DNS record.
 type createRecordRequest struct {
-	Type    string         `json:"type"`
-	Name    string         `json:"name"`
-	Content string         `json:"content,omitempty"`
-	TTL     int            `json:"ttl"`
-	Proxied bool           `json:"proxied"`
-	Data    *srvRecordData `json:"data,omitempty"` // For SRV records
+	Type     string         `json:"type"`
+	Name     string         `json:"name"`
+	Content  string         `json:"content,omitempty"`
+	TTL      int            `json:"ttl"`
+	Proxied  bool           `json:"proxied"`
+	Data     *srvRecordData `json:"data,omitempty"`     // For SRV records
+	Priority *uint16        `json:"priority,omitempty"` // For MX records
 }
 
 // Client is a Cloudflare DNS API client.
@@ -383,6 +385,75 @@ func (c *Client) CreateSRVRecord(ctx context.Context, zoneID string, name string
 		slog.Uint64("weight", uint64(weight)),
 		slog.Uint64("port", uint64(port)),
 		slog.String("target", target),
+		slog.Int("ttl", ttl),
+	)
+
+	return nil
+}
+
+// CreateMXRecord creates an MX record in the specified zone.
+// target is the mail exchanger hostname and preference is the RFC 1035 MX
+// preference, which the Cloudflare API carries in the top-level "priority"
+// field alongside "content".
+func (c *Client) CreateMXRecord(ctx context.Context, zoneID, name, target string, preference uint16, ttl int) error {
+	reqBody := createRecordRequest{
+		Type:     "MX",
+		Name:     name,
+		Content:  target,
+		TTL:      ttl,
+		Priority: &preference,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshaling request: %w", err)
+	}
+
+	path := fmt.Sprintf("/zones/%s/dns_records", zoneID)
+	_, err = c.doRequest(ctx, http.MethodPost, path, strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return fmt.Errorf("creating MX record: %w", err)
+	}
+
+	c.logger.Info("created MX record",
+		slog.String("zone_id", zoneID),
+		slog.String("name", name),
+		slog.String("target", target),
+		slog.Uint64("preference", uint64(preference)),
+		slog.Int("ttl", ttl),
+	)
+
+	return nil
+}
+
+// UpdateMXRecord updates an MX record by ID, replacing its mail exchanger,
+// preference and TTL.
+func (c *Client) UpdateMXRecord(ctx context.Context, zoneID, recordID, name, target string, preference uint16, ttl int) error {
+	reqBody := createRecordRequest{
+		Type:     "MX",
+		Name:     name,
+		Content:  target,
+		TTL:      ttl,
+		Priority: &preference,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshaling request: %w", err)
+	}
+
+	path := fmt.Sprintf("/zones/%s/dns_records/%s", zoneID, recordID)
+	_, err = c.doRequest(ctx, http.MethodPatch, path, strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return fmt.Errorf("updating MX record: %w", err)
+	}
+
+	c.logger.Info("updated MX record",
+		slog.String("zone_id", zoneID),
+		slog.String("record_id", recordID),
+		slog.String("name", name),
+		slog.String("target", target),
+		slog.Uint64("preference", uint64(preference)),
 		slog.Int("ttl", ttl),
 	)
 

@@ -109,7 +109,7 @@ func (r *Reconciler) reconcileDesiredSetWithState(ctx context.Context, set *desi
 				actions = append(actions, action)
 				continue
 			}
-			if err := instance.CreateRecordWithValues(ctx, record.Hostname, record.Type, record.Target, record.TTL, record.SRV, record.Metadata); err != nil {
+			if err := instance.CreateRecordWithValues(ctx, record.Hostname, record.Type, record.Target, record.TTL, record.SRV, record.MX, record.Metadata); err != nil {
 				action.Status = StatusFailed
 				action.Error = err.Error()
 				legacyUpgradeComplete = false

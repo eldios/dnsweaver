@@ -306,6 +306,7 @@ func (r *Reconciler) ensureRecordForProvider(ctx context.Context, hostname *sour
 	target := inst.EffectiveTarget()
 	ttl := inst.TTL
 	var srvData *provider.SRVData
+	var mxData *provider.MXData
 	var metadata map[string]string
 	adoptExisting := r.effectiveAdoptExisting(hostname, inst)
 
@@ -327,6 +328,12 @@ func (r *Reconciler) ensureRecordForProvider(ctx context.Context, hostname *sour
 				Port:     hints.SRV.Port,
 			}
 		}
+		// Extract MX-specific data for MX records
+		if hints.MX != nil {
+			mxData = &provider.MXData{
+				Preference: hints.MX.Preference,
+			}
+		}
 		// Pass through metadata from source hints to provider
 		if len(hints.Metadata) > 0 {
 			metadata = hints.Metadata
@@ -342,12 +349,14 @@ func (r *Reconciler) ensureRecordForProvider(ctx context.Context, hostname *sour
 		Target:   target,
 		TTL:      ttl,
 		SRV:      srvData,
+		MX:       mxData,
 		Metadata: metadata,
 	}
 
-	// TXT is multi-valued. Use the exact-member path even for single-host
-	// callers, with a complete snapshot for ownership and cache-miss parity.
-	if recordType == provider.RecordTypeTXT {
+	// TXT, MX and NS are multi-valued. Use the exact-member path even for
+	// single-host callers, with a complete snapshot for ownership and
+	// cache-miss parity.
+	if recordType == provider.RecordTypeTXT || recordType == provider.RecordTypeMX || recordType == provider.RecordTypeNS {
 		if cache == nil || !cache.providerAvailable(inst.Name()) {
 			cache = newRecordCache(ctx, r.providers, r.logger)
 		}
@@ -618,7 +627,7 @@ func (r *Reconciler) ensureRecordForProvider(ctx context.Context, hostname *sour
 
 	// Step 6: Create the record (no existing records)
 	// Use CreateRecordWithValues to respect RecordHints overrides
-	if err := inst.CreateRecordWithValues(ctx, hostname.Name, recordType, target, ttl, srvData, metadata); err != nil {
+	if err := inst.CreateRecordWithValues(ctx, hostname.Name, recordType, target, ttl, srvData, mxData, metadata); err != nil {
 		// Handle conflict error (shouldn't happen after our checks, but be safe)
 		if provider.IsConflict(err) {
 			action.Type = ActionSkip
@@ -710,4 +719,16 @@ func srvDataEquals(a, b *provider.SRVData) bool {
 		return false
 	}
 	return a.Priority == b.Priority && a.Weight == b.Weight && a.Port == b.Port
+}
+
+// mxDataEquals compares two MXData structs for equality.
+// Returns true if both are nil or have identical preference.
+func mxDataEquals(a, b *provider.MXData) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Preference == b.Preference
 }

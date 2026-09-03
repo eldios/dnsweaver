@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -430,6 +431,128 @@ func TestEnsureRecord_SRVWithZeroPriorityAndWeight(t *testing.T) {
 		if action.Status == StatusFailed {
 			t.Errorf("SRV with zero priority/weight should succeed, got error: %s", action.Error)
 		}
+	}
+}
+
+// --- MX / NS ---
+
+// newMailProviderRegistry wires a single mock provider that claims
+// *.example.com, for the MX and NS hint tests below.
+func newMailProviderRegistry(t *testing.T, mock *testMockProvider, logger *slog.Logger) *provider.Registry {
+	t.Helper()
+	providers := provider.NewRegistry(logger)
+	providers.RegisterFactory("mock", func(_ provider.FactoryConfig) (provider.Provider, error) {
+		return mock, nil
+	})
+	if err := providers.CreateInstance(provider.ProviderInstanceConfig{
+		Name:       "test-dns",
+		TypeName:   "mock",
+		RecordType: provider.RecordTypeA,
+		Target:     "10.0.0.1",
+		TTL:        300,
+		Domains:    []string{"*.example.com", "example.com"},
+	}); err != nil {
+		t.Fatalf("CreateInstance() error = %v", err)
+	}
+	return providers
+}
+
+func TestEnsureRecord_MXAndNSHintsReachProvider(t *testing.T) {
+	tests := []struct {
+		name           string
+		hints          *source.RecordHints
+		hostname       string
+		wantType       provider.RecordType
+		wantTarget     string
+		wantMX         bool
+		wantPreference uint16
+	}{
+		{
+			name:     "MX record carries its preference to the provider",
+			hostname: "example.com",
+			hints: &source.RecordHints{
+				Type:   "MX",
+				Target: "mail.protonmail.ch",
+				MX:     &source.MXHints{Preference: 10},
+			},
+			wantType:       provider.RecordTypeMX,
+			wantTarget:     "mail.protonmail.ch",
+			wantMX:         true,
+			wantPreference: 10,
+		},
+		{
+			name:     "MX record with preference zero is still passed through",
+			hostname: "example.com",
+			hints: &source.RecordHints{
+				Type:   "MX",
+				Target: "mail.protonmail.ch",
+				MX:     &source.MXHints{Preference: 0},
+			},
+			wantType:       provider.RecordTypeMX,
+			wantTarget:     "mail.protonmail.ch",
+			wantMX:         true,
+			wantPreference: 0,
+		},
+		{
+			name:     "NS record needs no extra data",
+			hostname: "sub.example.com",
+			hints: &source.RecordHints{
+				Type:   "NS",
+				Target: "ns1.example.net",
+			},
+			wantType:   provider.RecordTypeNS,
+			wantTarget: "ns1.example.net",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := quietLogger()
+			mockProvider := newTestMockProvider("test-dns")
+			providers := newMailProviderRegistry(t, mockProvider, logger)
+
+			r := New(nil, source.NewRegistry(logger), providers,
+				WithConfig(DefaultConfig()),
+				WithLogger(logger),
+			)
+
+			hostname := &source.Hostname{
+				Name:        tt.hostname,
+				Source:      "test",
+				RecordHints: tt.hints,
+			}
+
+			actions := r.ensureRecord(context.Background(), hostname, nil)
+			for _, action := range actions {
+				if action.Status == StatusFailed {
+					t.Fatalf("action failed: %s", action.Error)
+				}
+			}
+
+			created := mockProvider.GetCreatedDNSRecords()
+			if len(created) != 1 {
+				t.Fatalf("expected 1 created DNS record, got %d", len(created))
+			}
+			rec := created[0]
+			if rec.Type != tt.wantType {
+				t.Errorf("type = %q, want %q", rec.Type, tt.wantType)
+			}
+			if rec.Target != tt.wantTarget {
+				t.Errorf("target = %q, want %q", rec.Target, tt.wantTarget)
+			}
+			if !tt.wantMX {
+				if rec.MX != nil {
+					t.Errorf("MX data = %+v, want nil", rec.MX)
+				}
+				return
+			}
+			if rec.MX == nil {
+				t.Fatal("MX data is nil on the created record")
+			}
+			if rec.MX.Preference != tt.wantPreference {
+				t.Errorf("preference = %d, want %d", rec.MX.Preference, tt.wantPreference)
+			}
+		})
 	}
 }
 

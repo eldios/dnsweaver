@@ -243,17 +243,23 @@ type SRVHints struct {
 	Port     uint16 // TCP/UDP port number (1-65535)
 }
 
+// MXHints contains MX record-specific hints from source labels.
+type MXHints struct {
+	Preference uint16 // Lower values are tried first (0-65535)
+}
+
 // RecordHints contains optional hints for DNS record creation.
 // These allow sources (particularly native dnsweaver labels) to specify
 // record details that override provider defaults.
 //
 // All fields are optional - nil/zero values mean "use provider defaults".
 type RecordHints struct {
-	// Type overrides the record type (A, AAAA, CNAME, SRV, PTR, TXT).
+	// Type overrides the record type (A, AAAA, CNAME, SRV, MX, NS, PTR, TXT).
 	// Empty means use provider default.
 	Type string
 
-	// Target overrides the record target (IP for A/AAAA, hostname for CNAME/SRV).
+	// Target overrides the record target (IP for A/AAAA, hostname for
+	// CNAME/SRV/MX/NS).
 	// Empty means use provider default.
 	Target string
 
@@ -272,6 +278,9 @@ type RecordHints struct {
 
 	// SRV contains SRV-specific fields when Type is "SRV".
 	SRV *SRVHints
+
+	// MX contains MX-specific fields when Type is "MX".
+	MX *MXHints
 
 	// Metadata carries arbitrary key-value pairs from source labels to providers.
 	// Keys like "proxied" are actionable (trigger provider behavior).
