@@ -20,6 +20,8 @@ const (
 	RecordTypeTXT   RecordType = "TXT"
 	RecordTypeSRV   RecordType = "SRV"
 	RecordTypeHTTPS RecordType = "HTTPS"
+	RecordTypeMX    RecordType = "MX"
+	RecordTypeNS    RecordType = "NS"
 )
 
 // OwnershipPrefix is the default prefix for ownership TXT records.
@@ -47,6 +49,7 @@ const (
 	keyRecordHTTPSPriority   = "record-https-priority"
 	keyRecordHTTPSTargetName = "record-https-target-name"
 	keyRecordHTTPSALPN       = "record-https-alpn"
+	keyRecordMXPreference    = "record-mx-preference"
 )
 
 // MakeOwnershipValue returns the ownership TXT record value for the given instance ID and metadata.
@@ -167,6 +170,9 @@ func MakeMemberOwnershipValue(instanceID string, record Record, metadata map[str
 		fields[keyRecordHTTPSTargetName] = encodeOwnershipField(record.HTTPS.TargetName)
 		fields[keyRecordHTTPSALPN] = encodeOwnershipField(record.HTTPS.ALPN)
 	}
+	if record.Type == RecordTypeMX && record.MX != nil {
+		fields[keyRecordMXPreference] = strconv.FormatUint(uint64(record.MX.Preference), 10)
+	}
 
 	return MakeOwnershipValue(instanceID, fields)
 }
@@ -199,7 +205,7 @@ func ParseMemberOwnershipValue(value string) (isOwned bool, instanceID string, m
 
 	record := &Record{Type: recordType, Target: target}
 	switch recordType {
-	case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeTXT:
+	case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeTXT, RecordTypeNS:
 		// Target fully identifies these member types.
 	case RecordTypeSRV:
 		priority, priorityOK := parseOwnershipUint16(fields[keyRecordSRVPriority])
@@ -217,6 +223,12 @@ func ParseMemberOwnershipValue(value string) (isOwned bool, instanceID string, m
 			return true, instanceID, nil, stripMemberOwnershipFields(fields)
 		}
 		record.HTTPS = &HTTPSData{Priority: priority, TargetName: targetName, ALPN: alpn}
+	case RecordTypeMX:
+		preference, ok := parseOwnershipUint16(fields[keyRecordMXPreference])
+		if !ok {
+			return true, instanceID, nil, stripMemberOwnershipFields(fields)
+		}
+		record.MX = &MXData{Preference: preference}
 	}
 
 	return true, instanceID, record, stripMemberOwnershipFields(fields)
@@ -224,7 +236,7 @@ func ParseMemberOwnershipValue(value string) (isOwned bool, instanceID string, m
 
 func validOwnershipRecordType(recordType RecordType) bool {
 	switch recordType {
-	case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeTXT, RecordTypeSRV, RecordTypeHTTPS:
+	case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeTXT, RecordTypeSRV, RecordTypeHTTPS, RecordTypeMX, RecordTypeNS:
 		return true
 	default:
 		return false
@@ -263,6 +275,9 @@ func SameRecordMember(a, b Record) bool {
 	if a.Type == RecordTypeHTTPS {
 		return sameHTTPSData(a.HTTPS, b.HTTPS)
 	}
+	if a.Type == RecordTypeMX {
+		return sameMXData(a.MX, b.MX)
+	}
 	return true
 }
 
@@ -272,7 +287,7 @@ func canonicalRecordTarget(record Record) string {
 			return ip.String()
 		}
 	}
-	if record.Type == RecordTypeCNAME || record.Type == RecordTypeSRV {
+	if record.Type == RecordTypeCNAME || record.Type == RecordTypeSRV || record.Type == RecordTypeMX || record.Type == RecordTypeNS {
 		return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(record.Target), "."))
 	}
 	return record.Target
@@ -283,6 +298,19 @@ func sameSRVData(a, b *SRVData) bool {
 		return a == nil && b == nil
 	}
 	return a.Priority == b.Priority && a.Weight == b.Weight && a.Port == b.Port
+}
+
+// sameMXData treats missing MX data as preference 0, the value a source
+// declares when it gives no priority.
+func sameMXData(a, b *MXData) bool {
+	return mxPreference(a) == mxPreference(b)
+}
+
+func mxPreference(data *MXData) uint16 {
+	if data == nil {
+		return 0
+	}
+	return data.Preference
 }
 
 func sameHTTPSData(a, b *HTTPSData) bool {
@@ -317,7 +345,8 @@ func stripMemberOwnershipFields(fields map[string]string) map[string]string {
 		switch key {
 		case keyRecordVersion, keyRecordType, keyRecordTarget,
 			keyRecordSRVPriority, keyRecordSRVWeight, keyRecordSRVPort,
-			keyRecordHTTPSPriority, keyRecordHTTPSTargetName, keyRecordHTTPSALPN:
+			keyRecordHTTPSPriority, keyRecordHTTPSTargetName, keyRecordHTTPSALPN,
+			keyRecordMXPreference:
 			continue
 		default:
 			metadata[key] = value
@@ -335,6 +364,16 @@ type SRVData struct {
 	Priority uint16 // Lower values = higher priority (0-65535)
 	Weight   uint16 // Load balancing among same-priority servers (0-65535)
 	Port     uint16 // TCP/UDP port number (1-65535)
+}
+
+// MXData contains MX record-specific fields.
+// Used when Type is RecordTypeMX. The mail exchanger hostname lives in
+// Record.Target, mirroring how SRV carries its target.
+type MXData struct {
+	// Preference selects among the mail exchangers for a name: lower values are
+	// tried first (RFC 1035 section 3.3.9). Provider APIs generally spell this
+	// field "priority".
+	Preference uint16
 }
 
 // HTTPSData contains HTTPS (SVCB Type 65) record-specific fields.
@@ -358,13 +397,16 @@ type HTTPSData struct {
 type Record struct {
 	Hostname   string
 	Type       RecordType
-	Target     string // IP for A/AAAA, hostname for CNAME/SRV target
+	Target     string // IP for A/AAAA, hostname for CNAME/SRV/MX/NS target
 	TTL        int
 	ProviderID string   // Provider-specific record identifier
 	SRV        *SRVData // SRV-specific data (only set when Type is SRV)
 
 	// HTTPS holds HTTPS/SVCB record-specific data (only set when Type is HTTPS).
 	HTTPS *HTTPSData
+
+	// MX holds MX record-specific data (only set when Type is MX).
+	MX *MXData
 
 	// Metadata carries provider-specific key-value pairs through the reconciliation pipeline.
 	// Providers read actionable keys (e.g., "proxied" for Cloudflare) during Create/Update.
@@ -494,6 +536,17 @@ func RecordEquals(a, b Record) bool {
 		return a.SRV.Priority == b.SRV.Priority &&
 			a.SRV.Weight == b.SRV.Weight &&
 			a.SRV.Port == b.SRV.Port
+	}
+
+	// For MX records, also compare the preference
+	if a.Type == RecordTypeMX {
+		if a.MX == nil && b.MX == nil {
+			return true
+		}
+		if a.MX == nil || b.MX == nil {
+			return false
+		}
+		return a.MX.Preference == b.MX.Preference
 	}
 
 	// For HTTPS records, also compare HTTPS-specific data

@@ -404,3 +404,60 @@ func TestReconcile_MemberCircuitBreakerSuppressesMassRemoval(t *testing.T) {
 		t.Fatalf("mass-removal breaker allowed member deletion: actions=%+v deleted=%+v", result.Actions, mock.GetDeleted())
 	}
 }
+
+func hintedMX(hostname, target string, preference uint16) *source.Hostname {
+	return &source.Hostname{Name: hostname, Source: "native", RecordHints: &source.RecordHints{
+		Type: "MX", Target: target, MX: &source.MXHints{Preference: preference},
+	}}
+}
+
+func TestReconcile_MXRecordSetReplacesOnlyTheChangedMember(t *testing.T) {
+	sourceMock := newTestMockSource("native",
+		*hintedMX("mail.example.com", "mx1.example.net", 10),
+		*hintedMX("mail.example.com", "mx2.example.net", 20),
+	)
+	workloads := []workload.Workload{{ID: "one", Name: "one", Platform: workload.PlatformDocker}}
+	caps := setTestCapabilities(true, false)
+	caps.SupportedRecordTypes = append(caps.SupportedRecordTypes, provider.RecordTypeMX)
+	r, mock, _ := liveSetHarness(t, caps, sourceMock, workloads)
+
+	first, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if first.DesiredMembers != 2 || len(first.Created()) != 2 {
+		t.Fatalf("first result = %+v, want two MX members created", first.Actions)
+	}
+	if got := mock.GetCreatedOwnershipRecords(); len(got) != 2 {
+		t.Fatalf("ownership records = %+v, want one marker per MX member", got)
+	}
+
+	// A preference is part of the MX member, like SRV priority: the changed
+	// member is replaced and its sibling stays untouched.
+	sourceMock.hostnames = source.Hostnames{
+		*hintedMX("mail.example.com", "mx1.example.net", 15),
+		*hintedMX("mail.example.com", "mx2.example.net", 20),
+	}
+	second, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	created, deleted := second.Created(), second.Deleted()
+	if len(created) != 1 || created[0].Target != "mx1.example.net" || len(deleted) != 1 || deleted[0].Target != "mx1.example.net" {
+		t.Fatalf("second actions = %+v, want mx1 replaced only", second.Actions)
+	}
+
+	records, err := mock.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	preferences := map[string]uint16{}
+	for _, record := range records {
+		if record.Type == provider.RecordTypeMX {
+			preferences[record.Target] = record.MX.Preference
+		}
+	}
+	if len(preferences) != 2 || preferences["mx1.example.net"] != 15 || preferences["mx2.example.net"] != 20 {
+		t.Fatalf("MX members = %v, want mx1=15 and mx2=20", preferences)
+	}
+}

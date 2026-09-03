@@ -1,6 +1,6 @@
 ---
 title: Cloudflare DNS Provider
-description: Automate Cloudflare DNS records from Docker, Kubernetes, and Proxmox with dnsweaver — A, AAAA, CNAME, SRV, and TXT records with optional proxying.
+description: Automate Cloudflare DNS records from Docker, Kubernetes, and Proxmox with dnsweaver — A, AAAA, CNAME, SRV, MX, NS, and TXT records with optional proxying.
 ---
 
 # Cloudflare
@@ -76,6 +76,34 @@ Point to another hostname (common for Cloudflare Tunnels):
 ```yaml
 - DNSWEAVER_CLOUDFLARE_RECORD_TYPE=CNAME
 - DNSWEAVER_CLOUDFLARE_TARGET=abc123.cfargotunnel.com
+```
+
+### MX Records
+
+Point a domain's mail at a mail exchanger. MX is a per-record type: declare it
+with [native labels](../sources/native-labels.md), not with `RECORD_TYPE`.
+`priority` is the MX preference (lower is tried first) and defaults to `0`.
+
+```yaml
+labels:
+  - "dnsweaver.records.mx.hostname=example.com"
+  - "dnsweaver.records.mx.type=MX"
+  - "dnsweaver.records.mx.target=mail.protonmail.ch"
+  - "dnsweaver.records.mx.priority=10"
+```
+
+A hostname may carry several MX records. Each one is a separate member with
+its own ownership marker, and changing a preference replaces only that member.
+
+### NS Records
+
+Delegate a subdomain to other nameservers. NS is a per-record type as well:
+
+```yaml
+labels:
+  - "dnsweaver.records.deleg.hostname=sub.example.com"
+  - "dnsweaver.records.deleg.type=NS"
+  - "dnsweaver.records.deleg.target=ns1.example.net"
 ```
 
 ### Proxied Records

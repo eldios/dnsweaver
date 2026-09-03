@@ -175,6 +175,9 @@ func desiredRecordForClaim(claim *source.Hostname, instance *provider.ProviderIn
 				Port:     hints.SRV.Port,
 			}
 		}
+		if hints.MX != nil {
+			record.MX = &provider.MXData{Preference: hints.MX.Preference}
+		}
 		if len(hints.Metadata) > 0 {
 			record.Metadata = hints.Metadata
 		}

@@ -119,7 +119,7 @@ func (p *Provider) Capabilities() provider.Capabilities {
 			provider.RecordTypeTXT,
 			provider.RecordTypeSRV,
 			// Note: MX and PTR are supported by pkg/dnsupdate but not yet
-			// in the provider interface. See issue #133.
+			// wired into this provider. See issue #133.
 		},
 	}
 }

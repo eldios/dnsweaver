@@ -199,19 +199,21 @@ func sliceContainsString(haystack []string, needle string) bool {
 // CreateRecord creates a DNS record for the given hostname using this instance's
 // record type and target configuration.
 func (pi *ProviderInstance) CreateRecord(ctx context.Context, hostname string) error {
-	return pi.CreateRecordWithValues(ctx, hostname, pi.RecordType, pi.EffectiveTarget(), pi.TTL, nil, nil)
+	return pi.CreateRecordWithValues(ctx, hostname, pi.RecordType, pi.EffectiveTarget(), pi.TTL, nil, nil, nil)
 }
 
-// CreateRecordWithValues creates a DNS record with explicit type, target, TTL, optional SRV data,
-// and optional metadata. Metadata is passed through to the provider for provider-specific behavior
-// (e.g., Cloudflare proxied state). A nil metadata map is valid and means no metadata.
-func (pi *ProviderInstance) CreateRecordWithValues(ctx context.Context, hostname string, recordType RecordType, target string, ttl int, srvData *SRVData, metadata map[string]string) error {
+// CreateRecordWithValues creates a DNS record with explicit type, target, TTL, optional SRV
+// and MX data, and optional metadata. Metadata is passed through to the provider for
+// provider-specific behavior (e.g., Cloudflare proxied state). A nil metadata map is valid
+// and means no metadata.
+func (pi *ProviderInstance) CreateRecordWithValues(ctx context.Context, hostname string, recordType RecordType, target string, ttl int, srvData *SRVData, mxData *MXData, metadata map[string]string) error {
 	record := Record{
 		Hostname: hostname,
 		Type:     recordType,
 		Target:   target,
 		TTL:      ttl,
 		SRV:      srvData,
+		MX:       mxData,
 		Metadata: metadata,
 	}
 
@@ -343,7 +345,7 @@ func (pi *ProviderInstance) GetExistingRecords(ctx context.Context, hostname str
 		// Case-insensitive hostname comparison per RFC 1035 Section 2.3.3
 		if strings.EqualFold(r.Hostname, hostname) {
 			switch r.Type {
-			case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeSRV, RecordTypeHTTPS:
+			case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeSRV, RecordTypeHTTPS, RecordTypeMX, RecordTypeNS:
 				matching = append(matching, r)
 			case RecordTypeTXT:
 				// Skip TXT records (ownership markers)
