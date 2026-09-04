@@ -128,6 +128,14 @@ func ValidateHostname(hostname string) error {
 			continue
 		}
 
+		// An underscored label scopes an attribute rather than naming a host
+		// (RFC 8552): _dmarc, _domainkey, _acme-challenge, _matrix._tcp. The
+		// rest of the label follows the ordinary rules.
+		label = strings.TrimPrefix(label, "_")
+		if label == "" {
+			return &HostnameValidationError{Hostname: hostname, Label: label, Err: ErrLabelEmpty}
+		}
+
 		// Validate label format
 		if len(label) == 1 {
 			if !singleCharLabelRegex.MatchString(label) {
