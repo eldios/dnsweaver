@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/maxfield-allison/dnsweaver/pkg/provider"
+	"github.com/maxfield-allison/dnsweaver/pkg/source"
 )
 
 // dnsmasqRecord represents a parsed dnsmasq DNS record.
@@ -449,11 +450,32 @@ func (c *Client) Delete(ctx context.Context, record dnsmasqRecord) error {
 
 // formatRecord formats a record as a dnsmasq config line.
 func (c *Client) formatRecord(record dnsmasqRecord) (string, error) {
+	if err := source.ValidateHostname(record.Hostname); err != nil {
+		return "", fmt.Errorf("invalid record hostname: %w", err)
+	}
+
 	switch record.Type {
-	case provider.RecordTypeA, provider.RecordTypeAAAA:
+	case provider.RecordTypeA:
+		ip := net.ParseIP(record.Target)
+		if ip == nil || ip.To4() == nil {
+			return "", fmt.Errorf("record type A target must be an IPv4 address")
+		}
+		// address=/hostname/ip
+		return fmt.Sprintf("address=/%s/%s", record.Hostname, record.Target), nil
+	case provider.RecordTypeAAAA:
+		ip := net.ParseIP(record.Target)
+		if ip == nil || ip.To4() != nil {
+			return "", fmt.Errorf("record type AAAA target must be an IPv6 address")
+		}
 		// address=/hostname/ip
 		return fmt.Sprintf("address=/%s/%s", record.Hostname, record.Target), nil
 	case provider.RecordTypeCNAME:
+		if record.Target == "*" || strings.HasPrefix(record.Target, "*.") {
+			return "", fmt.Errorf("record type CNAME target must not be a wildcard")
+		}
+		if err := source.ValidateHostname(record.Target); err != nil {
+			return "", fmt.Errorf("record type CNAME target must be a hostname: %w", err)
+		}
 		// cname=alias,target
 		return fmt.Sprintf("cname=%s,%s", record.Hostname, record.Target), nil
 	default:
@@ -491,7 +513,7 @@ func (c *Client) WriteRecords(ctx context.Context, records []dnsmasqRecord) erro
 	for _, record := range records {
 		line, err := c.formatRecord(record)
 		if err != nil {
-			return fmt.Errorf("formatting record %s: %w", record.Hostname, err)
+			return fmt.Errorf("formatting record %q: %w", record.Hostname, err)
 		}
 		lines = append(lines, line)
 	}

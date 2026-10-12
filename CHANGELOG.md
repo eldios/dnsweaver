@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [3.1.1] - 2026-10-12
+
+### Security
+
+- The dnsmasq provider now validates record hostnames and type-specific targets immediately before formatting its managed configuration. Invalid A, AAAA and CNAME values are rejected without changing the file, preventing workload-controlled record hints from adding dnsmasq directives. Upgrade every dnsmasq-backed instance, inspect its managed file for unexpected directives and reload dnsmasq after removing them. Updating prevents new injection; it does not remove directives already written. Until then, restrict who can set labels or annotations on watched workloads.
+
+
 ## [3.1.0] - 2026-10-12
 
 ### Added

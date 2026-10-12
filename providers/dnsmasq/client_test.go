@@ -480,6 +480,86 @@ func TestClient_Create(t *testing.T) {
 	}
 }
 
+func TestClient_CreateRejectsConfigInjectionViaTarget(t *testing.T) {
+	mockFS := newMockFileSystem()
+	mockFS.dirs["/etc/dnsmasq.d"] = true
+	mockFS.files["/etc/dnsmasq.d/test.conf"] = []byte("address=/existing.example.com/10.0.0.1\n")
+
+	client := NewClient("/etc/dnsmasq.d", "test.conf", "echo reload", "",
+		WithFileSystem(mockFS))
+	original := string(mockFS.files["/etc/dnsmasq.d/test.conf"])
+
+	err := client.Create(context.Background(), dnsmasqRecord{
+		Hostname: "evil.example.com",
+		Type:     provider.RecordTypeA,
+		Target:   "1.2.3.4\r\nno-resolv\r\naddress=/admin.internal.example/6.6.6.6",
+	})
+	if err == nil || !strings.Contains(err.Error(), "IPv4 address") {
+		t.Fatalf("Create() error = %v, want invalid IPv4 target", err)
+	}
+	if got := string(mockFS.files["/etc/dnsmasq.d/test.conf"]); got != original {
+		t.Fatalf("config changed after rejected target:\n%s", got)
+	}
+}
+
+func TestClient_WriteRecordsRejectsConfigInjectionWithoutWriting(t *testing.T) {
+	mockFS := newMockFileSystem()
+	mockFS.dirs["/etc/dnsmasq.d"] = true
+	mockFS.files["/etc/dnsmasq.d/test.conf"] = []byte("address=/existing.example.com/10.0.0.1\n")
+
+	client := NewClient("/etc/dnsmasq.d", "test.conf", "echo reload", "",
+		WithFileSystem(mockFS))
+	original := string(mockFS.files["/etc/dnsmasq.d/test.conf"])
+
+	err := client.WriteRecords(context.Background(), []dnsmasqRecord{
+		{Hostname: "valid.example.com", Type: provider.RecordTypeA, Target: "10.0.0.2"},
+		{Hostname: "evil.example.com", Type: provider.RecordTypeCNAME, Target: "target.example.com\r\nno-resolv"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be a hostname") {
+		t.Fatalf("WriteRecords() error = %v, want invalid CNAME target", err)
+	}
+	if got := string(mockFS.files["/etc/dnsmasq.d/test.conf"]); got != original {
+		t.Fatalf("config changed after rejected target:\n%s", got)
+	}
+}
+
+func TestClient_FormatRecordValidatesFields(t *testing.T) {
+	client := NewClient("/etc/dnsmasq.d", "test.conf", "echo reload", "")
+	tests := []struct {
+		name    string
+		record  dnsmasqRecord
+		want    string
+		wantErr string
+	}{
+		{name: "A", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeA, Target: "192.0.2.10"}, want: "address=/app.example.com/192.0.2.10"},
+		{name: "AAAA", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeAAAA, Target: "2001:db8::10"}, want: "address=/app.example.com/2001:db8::10"},
+		{name: "CNAME", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeCNAME, Target: "target.example.com."}, want: "cname=app.example.com,target.example.com."},
+		{name: "A rejects IPv6", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeA, Target: "2001:db8::10"}, wantErr: "IPv4 address"},
+		{name: "AAAA rejects IPv4", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeAAAA, Target: "192.0.2.10"}, wantErr: "IPv6 address"},
+		{name: "CNAME rejects comma", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeCNAME, Target: "target.example.com,no-resolv"}, wantErr: "must be a hostname"},
+		{name: "CNAME rejects wildcard", record: dnsmasqRecord{Hostname: "app.example.com", Type: provider.RecordTypeCNAME, Target: "*.example.com"}, wantErr: "must not be a wildcard"},
+		{name: "hostname rejects newline", record: dnsmasqRecord{Hostname: "app.example.com\nno-resolv", Type: provider.RecordTypeA, Target: "192.0.2.10"}, wantErr: "invalid record hostname"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := client.formatRecord(tt.record)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("formatRecord() error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("formatRecord() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("formatRecord() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClient_Delete(t *testing.T) {
 	mockFS := newMockFileSystem()
 	mockFS.files["/etc/dnsmasq.d/test.conf"] = []byte(`# Managed by dnsweaver
