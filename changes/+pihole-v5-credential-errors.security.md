@@ -1,0 +1,1 @@
+Pi-hole v5 request errors no longer include the hash derived from the configured password. Failed requests and some error responses carried the request URL, and with it the `auth` parameter, into returned errors and logs. The Pi-hole v6 API client and Pi-hole file mode are not affected by this issue.

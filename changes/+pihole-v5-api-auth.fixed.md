@@ -1,0 +1,1 @@
+The Pi-hole v5 API client now authenticates to password-protected servers and reads existing A and AAAA records. Earlier releases sent a hash that Pi-hole v5 does not accept, and read custom DNS entries in the wrong field order. If you use Pi-hole v5 in API mode, check after upgrading that dnsweaver lists the records you expect.

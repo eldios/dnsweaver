@@ -1,4 +1,4 @@
-package technitium
+package httputil
 
 import (
 	"encoding/json"
@@ -18,7 +18,14 @@ type requestError struct {
 func (e *requestError) Error() string { return e.message }
 func (e *requestError) Unwrap() error { return e.cause }
 
-func redactRequestError(err error, token string) error {
+// RedactRequestError returns err with request credentials removed from its
+// message, for providers whose APIs authenticate through the URL. It strips
+// the query string and user info from any *url.Error in the chain, then
+// replaces each non-empty secret, in raw, JSON-escaped and query-escaped form,
+// with REDACTED. The result still unwraps to err, so errors.Is and errors.As
+// keep matching cancellation, deadlines and provider error classes. It returns
+// err unchanged when nothing needed redacting.
+func RedactRequestError(err error, secrets ...string) error {
 	if err == nil {
 		return nil
 	}
@@ -36,12 +43,15 @@ func redactRequestError(err error, token string) error {
 			message = strings.ReplaceAll(message, requestErr.URL, requestURL.String())
 		}
 	}
-	if token != "" {
-		// API/proxy error bodies and malformed URLs can also echo the token.
-		encodedToken, _ := json.Marshal(token) // A string cannot fail JSON encoding.
-		message = strings.ReplaceAll(message, string(encodedToken[1:len(encodedToken)-1]), "REDACTED")
-		message = strings.ReplaceAll(message, url.QueryEscape(token), "REDACTED")
-		message = strings.ReplaceAll(message, token, "REDACTED")
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		// API/proxy error bodies and malformed URLs can also echo the secret.
+		encodedSecret, _ := json.Marshal(secret) // A string cannot fail JSON encoding.
+		message = strings.ReplaceAll(message, string(encodedSecret[1:len(encodedSecret)-1]), "REDACTED")
+		message = strings.ReplaceAll(message, url.QueryEscape(secret), "REDACTED")
+		message = strings.ReplaceAll(message, secret, "REDACTED")
 	}
 	if message == err.Error() {
 		return err

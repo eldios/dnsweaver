@@ -176,7 +176,7 @@ func NewClient(baseURL, token string, opts ...ClientOption) *Client {
 func (c *Client) doRequest(ctx context.Context, endpoint string, params url.Values) (result *apiResponse, err error) {
 	// Older supported servers require query-string authentication. Keep that
 	// contract, but protect every returned error before callers can log it.
-	defer func() { err = redactRequestError(err, c.token) }()
+	defer func() { err = httputil.RedactRequestError(err, c.token) }()
 
 	// Add token to params
 	if params == nil {
