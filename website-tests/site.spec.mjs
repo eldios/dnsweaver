@@ -1,7 +1,78 @@
-import {test, expect} from '@playwright/test';
-const product = 'dnsweaver';
-const display = 'dnsweaver';
-const domain = 'dnsweaver.com';
+import { test, expect } from "@playwright/test";
+const product = "dnsweaver";
+const display = "dnsweaver";
+const domain = "dnsweaver.com";
+test("DNS views explain the selected resolver using keyboard controls", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const internal = page.getByRole("button", { name: "Internal", exact: true });
+  await internal.focus();
+  await page.keyboard.press("Enter");
+  await expect(internal).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#horizon-status")).toHaveText(
+    "Internal view: your internal provider answers with the address configured for your network.",
+  );
+  await expect(page.locator('[data-resolver="internal"]')).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+  await expect(page.locator('[data-resolver="public"]')).toHaveAttribute(
+    "data-active",
+    "false",
+  );
+  await expect(page.locator('[data-resolver="internal"] code')).toHaveText(
+    "192.0.2.20",
+  );
+});
+test("the public DNS view preserves its example address and labels the illustration", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Public", exact: true }).click();
+  await expect(page.locator("#horizon-status")).toHaveText(
+    "Public view: your public provider answers with the address configured for outside access.",
+  );
+  await expect(page.locator('[data-resolver="public"]')).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+  await expect(page.locator('[data-resolver="public"] code')).toHaveText(
+    "203.0.113.20",
+  );
+  await expect(
+    page.getByText("Interactive illustration.", { exact: false }),
+  ).toContainText("not a live DNS lookup");
+});
+test("without JavaScript the homepage explains both DNS views and keeps installation reachable", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 320, height: 900 },
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto("http://127.0.0.1:38113/");
+    await expect(page.locator("[data-horizon-controls]")).toBeHidden();
+    await expect(page.locator('[data-resolver="internal"] code')).toHaveText(
+      "192.0.2.20",
+    );
+    await expect(page.locator('[data-resolver="public"] code')).toHaveText(
+      "203.0.113.20",
+    );
+    await expect(
+      page.getByRole("link", { name: "Get started in the docs" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  } finally {
+    await context.close();
+  }
+});
 for (const width of [1280,390,320]) {
   test(`home, pricing, privacy and real links at ${width}px`, async ({page}) => {
     await page.setViewportSize({width,height:900});
