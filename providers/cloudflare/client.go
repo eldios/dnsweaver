@@ -214,13 +214,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	return &apiResp, nil
 }
 
-// Ping checks connectivity to the Cloudflare API.
-// Lists a single zone rather than calling /user/tokens/verify: that endpoint
-// only accepts user-owned tokens and rejects account-scoped ones, so a token
-// holding exactly the Zone.DNS permissions this provider needs fails it while
-// every real operation succeeds.
-func (c *Client) Ping(ctx context.Context) error {
-	_, err := c.doRequest(ctx, http.MethodGet, "/zones?per_page=1", nil)
+// Ping checks connectivity by reading the managed zone's details. That
+// endpoint accepts user and account API tokens holding only DNS Read or DNS
+// Write on the zone, the same permissions the record operations need.
+func (c *Client) Ping(ctx context.Context, zoneID string) error {
+	_, err := c.doRequest(ctx, http.MethodGet, "/zones/"+url.PathEscape(zoneID), nil)
 	if err != nil {
 		return fmt.Errorf("ping failed: %w", err)
 	}

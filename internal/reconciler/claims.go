@@ -167,5 +167,11 @@ func sameDeclaredMember(a, b *source.Hostname) bool {
 	if b.RecordHints.SRV != nil {
 		recordB.SRV = &provider.SRVData{Priority: b.RecordHints.SRV.Priority, Weight: b.RecordHints.SRV.Weight, Port: b.RecordHints.SRV.Port}
 	}
+	if a.RecordHints.MX != nil {
+		recordA.MX = &provider.MXData{Preference: a.RecordHints.MX.Preference}
+	}
+	if b.RecordHints.MX != nil {
+		recordB.MX = &provider.MXData{Preference: b.RecordHints.MX.Preference}
+	}
 	return provider.SameRecordMember(recordA, recordB)
 }
