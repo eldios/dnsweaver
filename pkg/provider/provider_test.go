@@ -74,6 +74,108 @@ func TestRecordEquals(t *testing.T) {
 			expected: false,
 		},
 		{
+			name: "identical MX records",
+			a: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+				MX:       &MXData{Preference: 10},
+			},
+			b: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+				MX:       &MXData{Preference: 10},
+			},
+			expected: true,
+		},
+		{
+			name: "MX records with different preference",
+			a: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+				MX:       &MXData{Preference: 10},
+			},
+			b: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+				MX:       &MXData{Preference: 20},
+			},
+			expected: false,
+		},
+		{
+			name: "MX record with nil vs non-nil MX data",
+			a: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+				MX:       nil,
+			},
+			b: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+				MX:       &MXData{Preference: 10},
+			},
+			expected: false,
+		},
+		{
+			name: "MX records with nil MX data on both sides",
+			a: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+			},
+			b: Record{
+				Hostname: "example.com",
+				Type:     RecordTypeMX,
+				Target:   "mail.protonmail.ch",
+				TTL:      3600,
+			},
+			expected: true,
+		},
+		{
+			name: "identical NS records",
+			a: Record{
+				Hostname: "sub.example.com",
+				Type:     RecordTypeNS,
+				Target:   "ns1.example.net",
+				TTL:      3600,
+			},
+			b: Record{
+				Hostname: "sub.example.com",
+				Type:     RecordTypeNS,
+				Target:   "ns1.example.net",
+				TTL:      3600,
+			},
+			expected: true,
+		},
+		{
+			name: "NS records with different target",
+			a: Record{
+				Hostname: "sub.example.com",
+				Type:     RecordTypeNS,
+				Target:   "ns1.example.net",
+				TTL:      3600,
+			},
+			b: Record{
+				Hostname: "sub.example.com",
+				Type:     RecordTypeNS,
+				Target:   "ns2.example.net",
+				TTL:      3600,
+			},
+			expected: false,
+		},
+		{
 			name: "identical SRV records",
 			a: Record{
 				Hostname: "_minecraft._tcp.example.com",
@@ -714,6 +816,8 @@ func TestMemberOwnershipRoundTrip(t *testing.T) {
 		{name: "TXT with delimiter", record: Record{Type: RecordTypeTXT, Target: "one,two=three"}},
 		{name: "SRV", record: Record{Type: RecordTypeSRV, Target: "sip.example.com", SRV: &SRVData{Priority: 10, Weight: 20, Port: 5060}}},
 		{name: "HTTPS", record: Record{Type: RecordTypeHTTPS, Target: "", HTTPS: &HTTPSData{Priority: 1, TargetName: ".", ALPN: "h2,h3"}}},
+		{name: "MX", record: Record{Type: RecordTypeMX, Target: "mail.example.net", MX: &MXData{Preference: 10}}},
+		{name: "NS", record: Record{Type: RecordTypeNS, Target: "ns1.example.net"}},
 	}
 
 	for _, tt := range tests {
@@ -806,6 +910,30 @@ func TestSameRecordMemberCanonicalizesDNSValues(t *testing.T) {
 		Record{Type: RecordTypeSRV, Target: "sip.example.com", SRV: &SRVData{Priority: 20, Weight: 20, Port: 5060}},
 	) {
 		t.Fatal("different SRV members matched")
+	}
+	if !SameRecordMember(
+		Record{Type: RecordTypeMX, Target: "Mail.Example.NET.", MX: &MXData{Preference: 10}},
+		Record{Type: RecordTypeMX, Target: "mail.example.net", MX: &MXData{Preference: 10}},
+	) {
+		t.Fatal("equivalent MX values did not match")
+	}
+	if SameRecordMember(
+		Record{Type: RecordTypeMX, Target: "mail.example.net", MX: &MXData{Preference: 10}},
+		Record{Type: RecordTypeMX, Target: "mail.example.net", MX: &MXData{Preference: 20}},
+	) {
+		t.Fatal("MX members with different preferences matched")
+	}
+	if !SameRecordMember(
+		Record{Type: RecordTypeMX, Target: "mail.example.net"},
+		Record{Type: RecordTypeMX, Target: "mail.example.net", MX: &MXData{}},
+	) {
+		t.Fatal("missing MX data did not match preference 0")
+	}
+	if !SameRecordMember(
+		Record{Type: RecordTypeNS, Target: "NS1.example.net."},
+		Record{Type: RecordTypeNS, Target: "ns1.example.net"},
+	) {
+		t.Fatal("equivalent NS values did not match")
 	}
 }
 

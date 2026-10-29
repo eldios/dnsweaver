@@ -404,3 +404,152 @@ func TestReconcile_MemberCircuitBreakerSuppressesMassRemoval(t *testing.T) {
 		t.Fatalf("mass-removal breaker allowed member deletion: actions=%+v deleted=%+v", result.Actions, mock.GetDeleted())
 	}
 }
+
+func hintedMX(hostname, target string, preference uint16) *source.Hostname {
+	return &source.Hostname{Name: hostname, Source: "native", RecordHints: &source.RecordHints{
+		Type: "MX", Target: target, MX: &source.MXHints{Preference: preference},
+	}}
+}
+
+func TestReconcile_MXRecordSetReplacesOnlyTheChangedMember(t *testing.T) {
+	sourceMock := newTestMockSource("native",
+		*hintedMX("mail.example.com", "mx1.example.net", 10),
+		*hintedMX("mail.example.com", "mx2.example.net", 20),
+	)
+	workloads := []workload.Workload{{ID: "one", Name: "one", Platform: workload.PlatformDocker}}
+	caps := setTestCapabilities(true, false)
+	caps.SupportedRecordTypes = append(caps.SupportedRecordTypes, provider.RecordTypeMX)
+	r, mock, _ := liveSetHarness(t, caps, sourceMock, workloads)
+
+	first, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if first.DesiredMembers != 2 || len(first.Created()) != 2 {
+		t.Fatalf("first result = %+v, want two MX members created", first.Actions)
+	}
+	if got := mock.GetCreatedOwnershipRecords(); len(got) != 2 {
+		t.Fatalf("ownership records = %+v, want one marker per MX member", got)
+	}
+
+	// A preference is part of the MX member, like SRV priority: the changed
+	// member is replaced and its sibling stays untouched.
+	sourceMock.hostnames = source.Hostnames{
+		*hintedMX("mail.example.com", "mx1.example.net", 15),
+		*hintedMX("mail.example.com", "mx2.example.net", 20),
+	}
+	second, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	created, deleted := second.Created(), second.Deleted()
+	if len(created) != 1 || created[0].Target != "mx1.example.net" || len(deleted) != 1 || deleted[0].Target != "mx1.example.net" {
+		t.Fatalf("second actions = %+v, want mx1 replaced only", second.Actions)
+	}
+
+	records, err := mock.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	preferences := map[string]uint16{}
+	for _, record := range records {
+		if record.Type == provider.RecordTypeMX {
+			preferences[record.Target] = record.MX.Preference
+		}
+	}
+	if len(preferences) != 2 || preferences["mx1.example.net"] != 15 || preferences["mx2.example.net"] != 20 {
+		t.Fatalf("MX members = %v, want mx1=15 and mx2=20", preferences)
+	}
+}
+
+func mxCapabilities() provider.Capabilities {
+	caps := setTestCapabilities(true, false)
+	caps.SupportedRecordTypes = append(caps.SupportedRecordTypes, provider.RecordTypeMX)
+	return caps
+}
+
+func TestReconcile_MXPreferencesAtOneExchangerStayDistinct(t *testing.T) {
+	sourceMock := newTestMockSource("native",
+		*hintedMX("mail.example.com", "mx.example.net", 10),
+		*hintedMX("mail.example.com", "mx.example.net", 20),
+	)
+	workloads := []workload.Workload{{ID: "one", Name: "one", Platform: workload.PlatformDocker}}
+	r, mock, _ := liveSetHarness(t, mxCapabilities(), sourceMock, workloads)
+
+	first, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if first.DesiredMembers != 2 || len(first.Created()) != 2 {
+		t.Fatalf("first actions = %+v, want preferences 10 and 20 created as two members", first.Actions)
+	}
+
+	sourceMock.hostnames = source.Hostnames{*hintedMX("mail.example.com", "mx.example.net", 20)}
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	records, err := mock.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	var preferences []uint16
+	for _, record := range records {
+		if record.Type == provider.RecordTypeMX {
+			preferences = append(preferences, record.MX.Preference)
+		}
+	}
+	if len(preferences) != 1 || preferences[0] != 20 {
+		t.Fatalf("MX preferences = %v, want only 20", preferences)
+	}
+}
+
+func TestReconcile_LegacyHostnameMarkerDoesNotOwnManualMX(t *testing.T) {
+	manual := provider.Record{Hostname: "mail.example.com", Type: provider.RecordTypeMX, Target: "mx.example.net", TTL: 300, MX: &provider.MXData{Preference: 10}}
+	sourceMock := newTestMockSource("native", *hintedMX(manual.Hostname, manual.Target, 10))
+	workloads := []workload.Workload{{ID: "one", Name: "one", Platform: workload.PlatformDocker}}
+	r, mock, _ := liveSetHarness(t, mxCapabilities(), sourceMock, workloads)
+	mock.AddRecord(manual)
+	mock.AddRecord(provider.OwnershipRecord(manual.Hostname, 300, "test-instance", nil))
+
+	first, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if len(first.Created()) != 0 || len(first.Updated()) != 0 {
+		t.Fatalf("first actions = %+v, want the manual MX left unclaimed", first.Actions)
+	}
+	if got := mock.GetCreatedOwnershipRecords(); len(got) != 0 {
+		t.Fatalf("ownership markers created = %+v, want none for a manual MX", got)
+	}
+
+	// Withdrawing the claim must leave the manual record in place.
+	sourceMock.hostnames = nil
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	records, err := mock.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if !recordMemberPresent(records, manual) {
+		t.Fatalf("manual MX was deleted; remaining records = %+v", records)
+	}
+}
+
+func TestReconcile_ExplicitAdoptionClaimsManualMX(t *testing.T) {
+	manual := provider.Record{Hostname: "mail.example.com", Type: provider.RecordTypeMX, Target: "mx.example.net", TTL: 300, MX: &provider.MXData{Preference: 10}}
+	sourceMock := newTestMockSource("native", *hintedMX(manual.Hostname, manual.Target, 10))
+	workloads := []workload.Workload{{ID: "one", Name: "one", Platform: workload.PlatformDocker}}
+	r, mock, _ := liveSetHarness(t, mxCapabilities(), sourceMock, workloads)
+	r.config.AdoptExisting = true
+	mock.AddRecord(manual)
+	mock.AddRecord(provider.OwnershipRecord(manual.Hostname, 300, "test-instance", nil))
+
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	markers := mock.GetCreatedOwnershipRecords()
+	if len(markers) != 1 || !provider.MatchesMemberOwnership(markers[0].Target, "test-instance", manual) {
+		t.Fatalf("ownership markers created = %+v, want one exact marker for the adopted MX", markers)
+	}
+}

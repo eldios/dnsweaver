@@ -172,6 +172,8 @@ func (p *Provider) Capabilities() provider.Capabilities {
 			provider.RecordTypeCNAME,
 			provider.RecordTypeSRV,
 			provider.RecordTypeTXT,
+			provider.RecordTypeMX,
+			provider.RecordTypeNS,
 		},
 	}
 }
@@ -210,7 +212,7 @@ func (p *Provider) Ping(ctx context.Context) error {
 }
 
 // List returns all managed records in the zone.
-// Returns A, AAAA, CNAME, and TXT records.
+// Returns A, AAAA, CNAME, TXT, SRV, MX, and NS records.
 func (p *Provider) List(ctx context.Context) ([]provider.Record, error) {
 	zoneID, err := p.ZoneID(ctx)
 	if err != nil {
@@ -311,6 +313,41 @@ func (p *Provider) List(ctx context.Context) ([]provider.Record, error) {
 			rec.Target = r.Content
 		}
 		records = append(records, rec)
+	}
+
+	// Fetch MX records
+	mxRecords, err := p.client.ListRecords(ctx, zoneID, "MX")
+	if err != nil {
+		return nil, fmt.Errorf("listing MX records: %w", err)
+	}
+	for _, r := range mxRecords {
+		rec := provider.Record{
+			Hostname:   r.Name,
+			Type:       provider.RecordTypeMX,
+			Target:     r.Content,
+			TTL:        r.TTL,
+			ProviderID: r.ID,
+			MX:         &provider.MXData{},
+		}
+		if r.Priority != nil {
+			rec.MX.Preference = *r.Priority
+		}
+		records = append(records, rec)
+	}
+
+	// Fetch NS records
+	nsRecords, err := p.client.ListRecords(ctx, zoneID, "NS")
+	if err != nil {
+		return nil, fmt.Errorf("listing NS records: %w", err)
+	}
+	for _, r := range nsRecords {
+		records = append(records, provider.Record{
+			Hostname:   r.Name,
+			Type:       provider.RecordTypeNS,
+			Target:     r.Content,
+			TTL:        r.TTL,
+			ProviderID: r.ID,
+		})
 	}
 
 	p.logger.Debug("listed records",
@@ -423,8 +460,10 @@ func (p *Provider) Create(ctx context.Context, record provider.Record) error {
 		ttl = 1
 	}
 
-	// SRV records require special handling
-	if record.Type == provider.RecordTypeSRV {
+	// SRV and MX carry structured data beyond the target and need their own
+	// request shapes; every other type is content-only.
+	switch record.Type {
+	case provider.RecordTypeSRV:
 		if record.SRV == nil {
 			return fmt.Errorf("creating SRV record: SRV data is required")
 		}
@@ -432,7 +471,15 @@ func (p *Provider) Create(ctx context.Context, record provider.Record) error {
 		if err != nil {
 			return fmt.Errorf("creating SRV record: %w", err)
 		}
-	} else {
+	case provider.RecordTypeMX:
+		if record.MX == nil {
+			return fmt.Errorf("creating MX record: MX data is required")
+		}
+		err = p.client.CreateMXRecord(ctx, zoneID, record.Hostname, record.Target, record.MX.Preference, ttl)
+		if err != nil {
+			return fmt.Errorf("creating MX record: %w", err)
+		}
+	default:
 		recordType := string(record.Type)
 		err = p.client.CreateRecord(ctx, zoneID, recordType, record.Hostname, record.Target, ttl, proxied)
 		if err != nil {
@@ -520,10 +567,17 @@ func (p *Provider) Update(ctx context.Context, existing, desired provider.Record
 	}
 
 	switch desired.Type {
-	case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeTXT:
+	case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeTXT, provider.RecordTypeNS:
 		err = p.client.UpdateRecord(ctx, zoneID, apiRecord.ID, string(desired.Type), desired.Hostname, desired.Target, ttl, proxied)
 		if err != nil {
 			return fmt.Errorf("updating %s record: %w", desired.Type, err)
+		}
+	case provider.RecordTypeMX:
+		if desired.MX == nil {
+			return fmt.Errorf("updating MX record: MX data is required")
+		}
+		if err := p.client.UpdateMXRecord(ctx, zoneID, apiRecord.ID, desired.Hostname, desired.Target, desired.MX.Preference, ttl); err != nil {
+			return fmt.Errorf("updating MX record: %w", err)
 		}
 	case provider.RecordTypeSRV:
 		// SRV records need special handling - for now, fall back to delete+create
@@ -597,7 +651,16 @@ func cloudflareRecordMatches(apiRecord dnsRecord, record provider.Record) bool {
 		return apiIP != nil && recordIP != nil && apiIP.Equal(recordIP)
 	}
 
-	if record.Type == provider.RecordTypeCNAME {
+	if record.Type == provider.RecordTypeMX {
+		var preference uint16
+		if record.MX != nil {
+			preference = record.MX.Preference
+		}
+		return apiRecord.Priority != nil && *apiRecord.Priority == preference &&
+			strings.EqualFold(strings.TrimSuffix(apiRecord.Content, "."), strings.TrimSuffix(record.Target, "."))
+	}
+
+	if record.Type == provider.RecordTypeCNAME || record.Type == provider.RecordTypeNS {
 		return strings.EqualFold(strings.TrimSuffix(apiRecord.Content, "."), strings.TrimSuffix(record.Target, "."))
 	}
 
@@ -612,7 +675,7 @@ func cloudflareRecordMatches(apiRecord dnsRecord, record provider.Record) bool {
 // Only the proxied flag is compared. TTL is deliberately left out: Cloudflare
 // reports TTL 1 ("automatic") for every proxied record regardless of what was
 // requested, so comparing it would rewrite each proxied record on every pass.
-// Records List did not annotate (TXT, SRV) never need an update here.
+// Records List did not annotate (TXT, SRV, MX, NS) never need an update here.
 func (p *Provider) RecordNeedsUpdate(existing, desired provider.Record) bool {
 	current, ok := existing.Metadata["proxied"]
 	if !ok {
@@ -633,7 +696,7 @@ var _ provider.RecordComparer = (*Provider)(nil)
 
 // resolveProxied determines the effective proxied state for a record and
 // warns when a requested proxy is refused. Priority order:
-//  1. TXT/SRV records are never proxied (Cloudflare limitation)
+//  1. TXT/SRV/MX/NS records are never proxied (Cloudflare limitation)
 //  2. Per-record Metadata["proxied"] override, else provider-level default
 //  3. A/AAAA records whose target is a non-routable IP are forced unproxied,
 //     because Cloudflare rejects proxying such targets with error 9003. This
@@ -673,8 +736,7 @@ func (p *Provider) resolveProxied(record provider.Record) bool {
 // not routable; explicit reports that the request came from a per-record
 // Metadata["proxied"] hint rather than the provider default.
 func (p *Provider) proxiedFor(record provider.Record) (proxied, demoted, explicit bool) {
-	// TXT and SRV records cannot be proxied by Cloudflare
-	if record.Type == provider.RecordTypeTXT || record.Type == provider.RecordTypeSRV {
+	if !isProxiableType(record.Type) {
 		return false, false, false
 	}
 
@@ -693,6 +755,17 @@ func (p *Provider) proxiedFor(record provider.Record) (proxied, demoted, explici
 	}
 
 	return proxied, false, explicit
+}
+
+// isProxiableType reports whether Cloudflare can serve a record type through
+// its proxy. TXT, SRV, MX and NS are always answered straight from DNS.
+func isProxiableType(rt provider.RecordType) bool {
+	switch rt {
+	case provider.RecordTypeTXT, provider.RecordTypeSRV, provider.RecordTypeMX, provider.RecordTypeNS:
+		return false
+	default:
+		return true
+	}
 }
 
 // isNonRoutableTarget reports whether the record's target is a literal IP that

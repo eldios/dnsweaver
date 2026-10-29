@@ -92,12 +92,12 @@ For advanced use cases, use the named record format: `dnsweaver.records.<name>.<
 | Label Pattern | Default | Description |
 |---------------|---------|-------------|
 | `dnsweaver.records.<name>.hostname` | - | Hostname for this record (required) |
-| `dnsweaver.records.<name>.type` | `A` | Record type: `A`, `AAAA`, `CNAME`, `SRV`, `TXT` |
+| `dnsweaver.records.<name>.type` | `A` | Record type: `A`, `AAAA`, `CNAME`, `SRV`, `MX`, `NS`, `TXT` |
 | `dnsweaver.records.<name>.target` | - | Override target (IP or hostname) |
 | `dnsweaver.records.<name>.provider` | - | Override the workload selection for this record; the instance must still match the configured domain and workload filters |
 | `dnsweaver.records.<name>.ttl` | - | TTL for this specific record |
 | `dnsweaver.records.<name>.port` | - | Port (for SRV records) |
-| `dnsweaver.records.<name>.priority` | - | Priority (for SRV records) |
+| `dnsweaver.records.<name>.priority` | `0` for MX | Priority (for SRV records) or preference (for MX records) |
 | `dnsweaver.records.<name>.weight` | - | Weight (for SRV records) |
 | `dnsweaver.records.<name>.enabled` | `true` | Enable/disable this record |
 | `dnsweaver.records.<name>.proxied` | provider default | Cloudflare proxy (orange-cloud) override for this record — `true` or `false`. Ignored by non-Cloudflare providers. |
@@ -174,6 +174,38 @@ services:
       - "dnsweaver.records.mc.port=25565"
       - "dnsweaver.records.mc.priority=10"
       - "dnsweaver.records.mc.weight=100"
+```
+
+### MX Record (Mail Delivery)
+
+Point a domain's mail at a hosted mailbox provider. `target` is the mail
+exchanger hostname and `priority` is the MX preference (lower is tried first);
+it defaults to `0` when omitted.
+
+```yaml
+services:
+  mail-config:
+    image: alpine
+    labels:
+      - "dnsweaver.records.mx.hostname=example.com"
+      - "dnsweaver.records.mx.type=MX"
+      - "dnsweaver.records.mx.target=mail.protonmail.ch"
+      - "dnsweaver.records.mx.priority=10"
+```
+
+Declare one `dnsweaver.records.<name>` block per mail exchanger to publish
+several MX records on the same hostname. Each one is a separate member, so a
+changed preference replaces only that record.
+
+### NS Record (Delegation)
+
+Delegate a subdomain to another set of nameservers:
+
+```yaml
+labels:
+  - "dnsweaver.records.deleg.hostname=sub.example.com"
+  - "dnsweaver.records.deleg.type=NS"
+  - "dnsweaver.records.deleg.target=ns1.example.net"
 ```
 
 ### Cloudflare Proxy Override (Per-Host)

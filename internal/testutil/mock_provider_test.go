@@ -116,8 +116,18 @@ func TestMockProvider_Capabilities(t *testing.T) {
 	if !caps.SupportsNativeUpdate {
 		t.Error("expected SupportsNativeUpdate to be true by default")
 	}
-	if len(caps.SupportedRecordTypes) != 5 {
-		t.Errorf("expected 5 supported record types, got %d", len(caps.SupportedRecordTypes))
+	for _, rt := range []provider.RecordType{
+		provider.RecordTypeA,
+		provider.RecordTypeAAAA,
+		provider.RecordTypeCNAME,
+		provider.RecordTypeSRV,
+		provider.RecordTypeTXT,
+		provider.RecordTypeMX,
+		provider.RecordTypeNS,
+	} {
+		if !caps.SupportsRecordType(rt) {
+			t.Errorf("expected %s to be supported by default", rt)
+		}
 	}
 
 	// Override capabilities
