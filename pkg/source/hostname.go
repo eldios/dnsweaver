@@ -80,12 +80,14 @@ func (e *HostnameValidationError) Unwrap() error {
 	return e.Err
 }
 
-// ValidateHostname validates a hostname according to RFC 1123.
+// ValidateHostname validates a DNS owner name using RFC 1123 label rules,
+// with optional leading underscores for attribute labels (RFC 8552).
 //
 // Rules:
 //   - Total length <= 253 characters
 //   - Each label (dot-separated part) <= 63 characters
-//   - Labels must start and end with alphanumeric (a-z, A-Z, 0-9)
+//   - Each label may have one leading underscore (RFC 8552)
+//   - The rest must start and end with alphanumeric (a-z, A-Z, 0-9)
 //   - Labels can contain hyphens in the middle
 //   - No empty labels (no ".." or leading/trailing dots after normalization)
 //   - Case insensitive (validation accepts both upper and lower case)
@@ -126,6 +128,14 @@ func ValidateHostname(hostname string) error {
 		// Special case: wildcard in first label
 		if i == 0 && label == "*" {
 			continue
+		}
+
+		// An underscored label scopes an attribute rather than naming a host
+		// (RFC 8552): _dmarc, _domainkey, _acme-challenge, _matrix._tcp. The
+		// rest of the label follows the ordinary rules.
+		label = strings.TrimPrefix(label, "_")
+		if label == "" {
+			return &HostnameValidationError{Hostname: hostname, Label: label, Err: ErrLabelEmpty}
 		}
 
 		// Validate label format

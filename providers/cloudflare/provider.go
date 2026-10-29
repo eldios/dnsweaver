@@ -202,9 +202,13 @@ func (p *Provider) ZoneID(ctx context.Context) (string, error) {
 	return p.zoneID, nil
 }
 
-// Ping checks connectivity to the Cloudflare API.
+// Ping checks connectivity to the Cloudflare API against the configured zone.
 func (p *Provider) Ping(ctx context.Context) error {
-	return p.client.Ping(ctx)
+	zoneID, err := p.ZoneID(ctx)
+	if err != nil {
+		return fmt.Errorf("ping failed: getting zone ID: %w", err)
+	}
+	return p.client.Ping(ctx, zoneID)
 }
 
 // List returns all managed records in the zone.
