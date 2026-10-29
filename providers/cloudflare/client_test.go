@@ -61,8 +61,8 @@ func TestClient_WithAPIEndpoint(t *testing.T) {
 
 func TestClient_Ping_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/zones" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+		if r.URL.Path != "/zones/zone-123" || r.URL.RawQuery != "" {
+			t.Errorf("unexpected request: %s", r.URL.RequestURI())
 		}
 
 		authHeader := r.Header.Get("Authorization")
@@ -71,14 +71,14 @@ func TestClient_Ping_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(successResponse([]map[string]interface{}{
-			{"id": "zone-id", "name": "example.com"},
+		_ = json.NewEncoder(w).Encode(successResponse(map[string]interface{}{
+			"id": "zone-123", "name": "example.com",
 		}))
 	}))
 	defer server.Close()
 
 	client := NewClient("test-token", WithAPIEndpoint(server.URL))
-	err := client.Ping(context.Background())
+	err := client.Ping(context.Background(), "zone-123")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -94,7 +94,7 @@ func TestClient_Ping_InvalidToken(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("bad-token", WithAPIEndpoint(server.URL))
-	err := client.Ping(context.Background())
+	err := client.Ping(context.Background(), "zone-123")
 
 	if err == nil {
 		t.Error("expected error, got nil")
@@ -420,7 +420,7 @@ func TestClient_RateLimiting(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient("test-token", WithAPIEndpoint(server.URL))
-	err := client.Ping(context.Background())
+	err := client.Ping(context.Background(), "zone-123")
 
 	// First call should fail with rate limit error
 	if err == nil {

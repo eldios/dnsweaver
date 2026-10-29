@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -96,21 +97,80 @@ func TestProvider_New_InvalidConfig(t *testing.T) {
 	}
 }
 
-func TestProvider_Ping_Success(t *testing.T) {
+// dnsOnlyZoneServer answers like Cloudflare for tokens holding only DNS
+// permissions on zone-123: zone details succeed, listing zones needs Zone
+// Read, and /user/tokens/verify accepts only user-owned tokens.
+func dnsOnlyZoneServer(t *testing.T, userTokens ...string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/zones/zone-123":
+			_ = json.NewEncoder(w).Encode(successProviderResponse(map[string]interface{}{"id": "zone-123", "name": "example.com"}))
+		case r.URL.Path == "/user/tokens/verify" && slices.Contains(userTokens, token):
+			_ = json.NewEncoder(w).Encode(successProviderResponse(map[string]interface{}{"id": "token-id", "status": "active"}))
+		default:
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(errorResponse(10000, "Authentication error"))
+		}
+	}))
+}
+
+func TestProvider_Ping_ConfiguredZoneWithDNSOnlyTokens(t *testing.T) {
+	server := dnsOnlyZoneServer(t, "user-token")
+	defer server.Close()
+
+	for _, token := range []string{"user-token", "cfat_account-token"} {
+		t.Run(token, func(t *testing.T) {
+			p, err := New("test-provider", &Config{Token: token, ZoneID: "zone-123", TTL: 300})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			p.client.apiEndpoint = server.URL
+			if err := p.Ping(context.Background()); err != nil {
+				t.Errorf("Ping() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestProvider_Ping_LooksUpZoneByName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(successProviderResponse(map[string]interface{}{
-			"id":     "token-id",
-			"status": "active",
-		}))
+		switch r.URL.Path {
+		case "/zones":
+			_ = json.NewEncoder(w).Encode(successProviderResponse([]map[string]interface{}{{"id": "zone-123", "name": "example.com"}}))
+		case "/zones/zone-123":
+			_ = json.NewEncoder(w).Encode(successProviderResponse(map[string]interface{}{"id": "zone-123", "name": "example.com"}))
+		default:
+			t.Errorf("unexpected request: %s", r.URL.RequestURI())
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
-	p := newTestProvider(t, server.URL)
-	err := p.Ping(context.Background())
-
+	p, err := New("test-provider", &Config{Token: "test-token", Zone: "example.com", TTL: 300})
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Fatalf("New() error = %v", err)
+	}
+	p.client.apiEndpoint = server.URL
+	if err := p.Ping(context.Background()); err != nil {
+		t.Errorf("Ping() error = %v", err)
+	}
+}
+
+func TestProvider_Ping_RejectedForZone(t *testing.T) {
+	server := dnsOnlyZoneServer(t)
+	defer server.Close()
+
+	p, err := New("test-provider", &Config{Token: "test-token", ZoneID: "other-zone", TTL: 300})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	p.client.apiEndpoint = server.URL
+	if err := p.Ping(context.Background()); err == nil {
+		t.Error("Ping() succeeded for a zone the token cannot read")
 	}
 }
 
