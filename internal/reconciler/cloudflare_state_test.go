@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -478,6 +479,7 @@ func TestReconcile_CloudflareTXTDeclarationsConverge(t *testing.T) {
 		{"quoted", `"v=spf1 -all"`, `"v=spf1 -all"`},
 		{"split strings", long, quoteTXTStrings(long)},
 		{"quoted split strings", quoteTXTStrings(long), quoteTXTStrings(long)},
+		{"quoted data containing quotes", `"\"hello\""`, `"\"hello\""`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -517,8 +519,13 @@ func TestReconcile_CloudflareTXTKeepsOwnershipAcrossQuoting(t *testing.T) {
 			api := &fakeCloudflareAPI{quoteTXT: true}
 			member := provider.Record{Hostname: "mail.example.com", Type: provider.RecordTypeTXT, Target: `"v=spf1 -all"`}
 			api.add("TXT", member.Hostname, member.Target, 300, false)
+			// Earlier releases recorded the declared value and no payload flag.
 			marker := provider.MemberOwnershipRecord(member.Hostname, 300, "", member, nil)
-			api.add("TXT", marker.Hostname, marker.Target, 300, false)
+			legacy := strings.Replace(marker.Target, ",record-txt-payload=1", "", 1)
+			if legacy == marker.Target {
+				t.Fatalf("marker %q carries no payload flag to strip", marker.Target)
+			}
+			api.add("TXT", marker.Hostname, legacy, 300, false)
 
 			r, lister := newCloudflareStateFixture(t, api, false, "203.0.113.10")
 			lister.AddWorkload("mail", map[string]string{
@@ -550,5 +557,41 @@ func TestReconcile_CloudflareTXTKeepsOwnershipAcrossQuoting(t *testing.T) {
 				t.Fatalf("TXT after removing the declaration = %q, want none", got)
 			}
 		})
+	}
+}
+
+func TestReconcile_CloudflareTXTKeepsQuotedDataDistinct(t *testing.T) {
+	// The manual record's data is "hello" with its quotes; declaring plain
+	// hello is a different value and must be published beside it.
+	api := &fakeCloudflareAPI{quoteTXT: true}
+	api.add("TXT", "mail.example.com", `"\"hello\""`, 300, false)
+	r, lister := newCloudflareStateFixture(t, api, false, "203.0.113.10")
+	lister.AddWorkload("mail", map[string]string{
+		"dnsweaver.records.txt.hostname": "mail.example.com",
+		"dnsweaver.records.txt.type":     "TXT",
+		"dnsweaver.records.txt.target":   "hello",
+	})
+
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	got := api.txtContents("mail.example.com")
+	if len(got) != 2 || !slices.Contains(got, `"\"hello\""`) || !slices.Contains(got, `"hello"`) {
+		t.Fatalf("TXT records = %q, want the manual quoted data and the declared hello", got)
+	}
+	writes := api.txtWrites()
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if got := api.txtWrites(); got != writes {
+		t.Fatalf("converged TXT caused %d further writes", got-writes)
+	}
+
+	lister.workloads = nil
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile after removal: %v", err)
+	}
+	if got := api.txtContents("mail.example.com"); len(got) != 1 || got[0] != `"\"hello\""` {
+		t.Fatalf("TXT after withdrawing hello = %q, want only the manual record", got)
 	}
 }

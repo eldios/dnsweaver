@@ -1496,3 +1496,21 @@ func TestCloudflareRecordMatches_QuotedTXT(t *testing.T) {
 		t.Error("a different TXT value matched")
 	}
 }
+
+func TestCloudflareRecordMatches_TXTDataContainingQuotes(t *testing.T) {
+	quotedData := provider.Record{Hostname: "example.com", Type: provider.RecordTypeTXT, Target: `"hello"`}
+	plain := provider.Record{Hostname: "example.com", Type: provider.RecordTypeTXT, Target: "hello"}
+	stored := dnsRecord{Name: "example.com", Type: "TXT", Content: `"\"hello\""`}
+	if !cloudflareRecordMatches(stored, quotedData) {
+		t.Error("stored quoted data did not match its record")
+	}
+	if cloudflareRecordMatches(stored, plain) {
+		t.Error("stored quoted data matched the plain value")
+	}
+	if cloudflareRecordMatches(dnsRecord{Name: "example.com", Type: "TXT", Content: `"hello"`}, quotedData) {
+		t.Error("stored plain value matched the quoted data")
+	}
+	if got := apiContent(quotedData); got != `"\"hello\""` {
+		t.Errorf("apiContent(%q) = %q, want quoted presentation", quotedData.Target, got)
+	}
+}

@@ -44,12 +44,29 @@ func DecodeTXTStrings(value string) (string, bool) {
 	return content.String(), true
 }
 
-// canonicalTXT returns the TXT value with any quoted-string presentation
-// removed, so a declared, a listed and a recorded form of one value compare
-// equal.
-func canonicalTXT(value string) string {
+// TXTPayload returns the character data a declared TXT value stands for. A
+// value written in quoted presentation, such as `"v=spf1 -all"` or
+// `"\"hello\""`, is decoded once; any other value already is the data.
+// Record.Target holds TXT data in this decoded form throughout dnsweaver.
+func TXTPayload(value string) string {
 	if decoded, ok := DecodeTXTStrings(value); ok {
 		return decoded
 	}
 	return value
+}
+
+// TXTPresentation is the inverse of TXTPayload for providers whose API takes
+// presentation text: data that TXTPayload would decode again, such as
+// `"hello"` with its quotes, is written as quoted strings of at most 255
+// bytes, and any other data is returned unchanged.
+func TXTPresentation(payload string) string {
+	if _, ok := DecodeTXTStrings(payload); !ok {
+		return payload
+	}
+	var parts []string
+	for len(payload) > 255 {
+		parts = append(parts, strconv.Quote(payload[:255]))
+		payload = payload[255:]
+	}
+	return strings.Join(append(parts, strconv.Quote(payload)), " ")
 }

@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDecodeTXTStrings(t *testing.T) {
 	tests := []struct {
@@ -26,18 +29,46 @@ func TestDecodeTXTStrings(t *testing.T) {
 	}
 }
 
-func TestSameRecordMember_TXTQuoting(t *testing.T) {
+func TestTXTPayloadAndPresentation(t *testing.T) {
+	tests := []struct {
+		name         string
+		declared     string
+		payload      string
+		presentation string
+	}{
+		{"plain", "v=spf1 -all", "v=spf1 -all", "v=spf1 -all"},
+		{"quoted", `"v=spf1 -all"`, "v=spf1 -all", "v=spf1 -all"},
+		{"split", `"p=MIIB" "IjAN"`, "p=MIIBIjAN", "p=MIIBIjAN"},
+		{"data containing quotes", `"\"hello\""`, `"hello"`, `"\"hello\""`},
+		{"malformed quoting is data", `"open`, `"open`, `"open`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TXTPayload(tt.declared); got != tt.payload {
+				t.Errorf("TXTPayload(%q) = %q, want %q", tt.declared, got, tt.payload)
+			}
+			if got := TXTPresentation(tt.payload); got != tt.presentation {
+				t.Errorf("TXTPresentation(%q) = %q, want %q", tt.payload, got, tt.presentation)
+			}
+			if got := TXTPayload(TXTPresentation(tt.payload)); got != tt.payload {
+				t.Errorf("round trip of %q = %q", tt.payload, got)
+			}
+		})
+	}
+}
+
+func TestMemberOwnership_TXTPayloadIsExact(t *testing.T) {
 	txt := func(target string) Record { return Record{Type: RecordTypeTXT, Target: target} }
-	if !SameRecordMember(txt(`"v=spf1 -all"`), txt("v=spf1 -all")) {
-		t.Error("quoted and unquoted forms of one value did not match")
+	quotedData := MakeMemberOwnershipValue("x", txt(`"hello"`), nil)
+	if MatchesMemberOwnership(quotedData, "x", txt("hello")) {
+		t.Error("marker for the data \"hello\" matched the data hello")
 	}
-	if !SameRecordMember(txt(`"v=DKIM1; p=MIIB" "IjAN"`), txt("v=DKIM1; p=MIIBIjAN")) {
-		t.Error("split and joined forms of one value did not match")
+	if !MatchesMemberOwnership(quotedData, "x", txt(`"hello"`)) {
+		t.Error("marker did not match its own data")
 	}
-	if SameRecordMember(txt(`"v=spf1 -all"`), txt("v=spf1 ~all")) {
-		t.Error("different TXT values matched")
-	}
-	if SameRecordMember(txt(`"open`), txt("open")) {
-		t.Error("malformed quoting was decoded")
+	// Markers from before the payload flag recorded the declared spelling.
+	legacy := strings.Replace(MakeMemberOwnershipValue("x", txt(`"v=spf1 -all"`), nil), ",record-txt-payload=1", "", 1)
+	if !MatchesMemberOwnership(legacy, "x", txt("v=spf1 -all")) {
+		t.Error("legacy marker with a quoted declaration lost its record")
 	}
 }

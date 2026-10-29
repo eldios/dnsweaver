@@ -412,6 +412,16 @@ func listedTXTContent(name, value string) (string, error) {
 	return value, nil
 }
 
+// apiContent is the content field for record. Data TXT is written so that
+// listedTXTContent reads back the same data: Cloudflare takes a value that
+// starts with a quote as presentation text, so such data is sent quoted.
+func apiContent(record provider.Record) string {
+	if record.Type != provider.RecordTypeTXT || provider.IsOwnershipRecord(record.Hostname) || provider.IsOwnershipStateRecord(record.Hostname) {
+		return record.Target
+	}
+	return provider.TXTPresentation(record.Target)
+}
+
 // Cloudflare can return one TXT RR as quoted wire strings. Compact payloads
 // concatenate those strings; unrelated user TXT retains its existing meaning.
 func compactTXTContent(name, value string) (string, error) {
@@ -471,7 +481,7 @@ func (p *Provider) Create(ctx context.Context, record provider.Record) error {
 		}
 	default:
 		recordType := string(record.Type)
-		err = p.client.CreateRecord(ctx, zoneID, recordType, record.Hostname, record.Target, ttl, proxied)
+		err = p.client.CreateRecord(ctx, zoneID, recordType, record.Hostname, apiContent(record), ttl, proxied)
 		if err != nil {
 			return fmt.Errorf("creating %s record: %w", recordType, err)
 		}
@@ -558,7 +568,7 @@ func (p *Provider) Update(ctx context.Context, existing, desired provider.Record
 
 	switch desired.Type {
 	case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeTXT, provider.RecordTypeNS:
-		err = p.client.UpdateRecord(ctx, zoneID, apiRecord.ID, string(desired.Type), desired.Hostname, desired.Target, ttl, proxied)
+		err = p.client.UpdateRecord(ctx, zoneID, apiRecord.ID, string(desired.Type), desired.Hostname, apiContent(desired), ttl, proxied)
 		if err != nil {
 			return fmt.Errorf("updating %s record: %w", desired.Type, err)
 		}
@@ -656,7 +666,7 @@ func cloudflareRecordMatches(apiRecord dnsRecord, record provider.Record) bool {
 
 	if record.Type == provider.RecordTypeTXT {
 		content, err := listedTXTContent(apiRecord.Name, apiRecord.Content)
-		return err == nil && provider.SameRecordMember(provider.Record{Type: provider.RecordTypeTXT, Target: content}, record)
+		return err == nil && content == record.Target
 	}
 
 	return apiRecord.Content == record.Target
