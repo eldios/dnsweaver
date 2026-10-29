@@ -365,7 +365,7 @@ func listedTXTContent(name, value string) (string, error) {
 	if provider.IsOwnershipStateRecord(name) || provider.IsOwnershipRecord(name) {
 		return compactTXTContent(name, value)
 	}
-	if decoded, ok := decodeTXTStrings(value); ok {
+	if decoded, ok := provider.DecodeTXTStrings(value); ok {
 		return decoded, nil
 	}
 	return value, nil
@@ -378,7 +378,7 @@ func compactTXTContent(name, value string) (string, error) {
 	if (!state && !provider.IsOwnershipRecord(name)) || !strings.HasPrefix(value, "\"") {
 		return value, nil
 	}
-	decoded, ok := decodeTXTStrings(value)
+	decoded, ok := provider.DecodeTXTStrings(value)
 	if !ok {
 		return "", fmt.Errorf("%w: invalid quoted ownership TXT", provider.ErrOwnershipState)
 	}
@@ -386,42 +386,6 @@ func compactTXTContent(name, value string) (string, error) {
 		return value, nil
 	}
 	return decoded, nil
-}
-
-// decodeTXTStrings concatenates a sequence of quoted TXT character strings.
-// It reports false when value does not start with a quote or is malformed.
-func decodeTXTStrings(value string) (string, bool) {
-	if !strings.HasPrefix(value, "\"") {
-		return "", false
-	}
-	var content strings.Builder
-	rest := value
-	for rest != "" {
-		if rest[0] != '"' {
-			return "", false
-		}
-		end := 1
-		for end < len(rest) {
-			if rest[end] == '\\' {
-				end += 2
-				continue
-			}
-			if rest[end] == '"' {
-				break
-			}
-			end++
-		}
-		if end >= len(rest) {
-			return "", false
-		}
-		decoded, err := strconv.Unquote(rest[:end+1])
-		if err != nil {
-			return "", false
-		}
-		content.WriteString(decoded)
-		rest = strings.TrimSpace(rest[end+1:])
-	}
-	return content.String(), true
 }
 
 // Create adds a new DNS record.
@@ -625,7 +589,7 @@ func cloudflareRecordMatches(apiRecord dnsRecord, record provider.Record) bool {
 
 	if record.Type == provider.RecordTypeTXT {
 		content, err := listedTXTContent(apiRecord.Name, apiRecord.Content)
-		return err == nil && content == record.Target
+		return err == nil && provider.SameRecordMember(provider.Record{Type: provider.RecordTypeTXT, Target: content}, record)
 	}
 
 	return apiRecord.Content == record.Target

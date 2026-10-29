@@ -272,6 +272,9 @@ func canonicalRecordTarget(record Record) string {
 			return ip.String()
 		}
 	}
+	if record.Type == RecordTypeTXT {
+		return canonicalTXT(record.Target)
+	}
 	if record.Type == RecordTypeCNAME || record.Type == RecordTypeSRV {
 		return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(record.Target), "."))
 	}
