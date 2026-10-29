@@ -271,7 +271,7 @@ func (p *Provider) List(ctx context.Context) ([]provider.Record, error) {
 		return nil, fmt.Errorf("listing TXT records: %w", err)
 	}
 	for _, r := range txtRecords {
-		content, contentErr := compactTXTContent(r.Name, r.Content)
+		content, contentErr := listedTXTContent(r.Name, r.Content)
 		if contentErr != nil {
 			return nil, contentErr
 		}
@@ -394,6 +394,20 @@ func (p *Provider) ListOwnershipState(ctx context.Context) ([]provider.Record, e
 	return records, nil
 }
 
+// listedTXTContent returns the TXT value as it was declared. Cloudflare reads
+// TXT content back as quoted wire strings even when it was written unquoted,
+// so data TXT is compared on its decoded strings. Content that is not a
+// well-formed sequence of quoted strings is kept as listed.
+func listedTXTContent(name, value string) (string, error) {
+	if provider.IsOwnershipStateRecord(name) || provider.IsOwnershipRecord(name) {
+		return compactTXTContent(name, value)
+	}
+	if decoded, ok := provider.DecodeTXTStrings(value); ok {
+		return decoded, nil
+	}
+	return value, nil
+}
+
 // Cloudflare can return one TXT RR as quoted wire strings. Compact payloads
 // concatenate those strings; unrelated user TXT retains its existing meaning.
 func compactTXTContent(name, value string) (string, error) {
@@ -401,34 +415,10 @@ func compactTXTContent(name, value string) (string, error) {
 	if (!state && !provider.IsOwnershipRecord(name)) || !strings.HasPrefix(value, "\"") {
 		return value, nil
 	}
-	var content strings.Builder
-	rest := value
-	for rest != "" {
-		if rest[0] != '"' {
-			return "", fmt.Errorf("%w: invalid quoted ownership TXT", provider.ErrOwnershipState)
-		}
-		end := 1
-		for end < len(rest) {
-			if rest[end] == '\\' {
-				end += 2
-				continue
-			}
-			if rest[end] == '"' {
-				break
-			}
-			end++
-		}
-		if end >= len(rest) {
-			return "", fmt.Errorf("%w: unterminated quoted ownership TXT", provider.ErrOwnershipState)
-		}
-		decoded, err := strconv.Unquote(rest[:end+1])
-		if err != nil {
-			return "", fmt.Errorf("%w: invalid quoted ownership TXT", provider.ErrOwnershipState)
-		}
-		content.WriteString(decoded)
-		rest = strings.TrimSpace(rest[end+1:])
+	decoded, ok := provider.DecodeTXTStrings(value)
+	if !ok {
+		return "", fmt.Errorf("%w: invalid quoted ownership TXT", provider.ErrOwnershipState)
 	}
-	decoded := content.String()
 	if !state && !provider.IsDnsweaverOwned(decoded) {
 		return value, nil
 	}
@@ -658,6 +648,11 @@ func cloudflareRecordMatches(apiRecord dnsRecord, record provider.Record) bool {
 
 	if record.Type == provider.RecordTypeCNAME || record.Type == provider.RecordTypeNS {
 		return strings.EqualFold(strings.TrimSuffix(apiRecord.Content, "."), strings.TrimSuffix(record.Target, "."))
+	}
+
+	if record.Type == provider.RecordTypeTXT {
+		content, err := listedTXTContent(apiRecord.Name, apiRecord.Content)
+		return err == nil && provider.SameRecordMember(provider.Record{Type: provider.RecordTypeTXT, Target: content}, record)
 	}
 
 	return apiRecord.Content == record.Target
