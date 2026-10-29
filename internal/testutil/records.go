@@ -75,6 +75,29 @@ func SRVRecord(hostname, target string, port, priority, weight uint16) provider.
 	}
 }
 
+// MXRecord creates an MX record for testing.
+func MXRecord(hostname, target string, preference uint16) provider.Record {
+	return provider.Record{
+		Hostname: hostname,
+		Type:     provider.RecordTypeMX,
+		Target:   target,
+		TTL:      DefaultTTL,
+		MX: &provider.MXData{
+			Preference: preference,
+		},
+	}
+}
+
+// NSRecord creates an NS record for testing.
+func NSRecord(hostname, target string) provider.Record {
+	return provider.Record{
+		Hostname: hostname,
+		Type:     provider.RecordTypeNS,
+		Target:   target,
+		TTL:      DefaultTTL,
+	}
+}
+
 // OwnershipRecord creates an ownership TXT record for the given hostname.
 // instanceID can be empty for legacy format.
 func OwnershipRecord(hostname, instanceID string) provider.Record {

@@ -114,6 +114,8 @@ func (m *testMockProvider) Capabilities() provider.Capabilities {
 			provider.RecordTypeCNAME,
 			provider.RecordTypeSRV,
 			provider.RecordTypeTXT,
+			provider.RecordTypeMX,
+			provider.RecordTypeNS,
 		},
 	}
 }
@@ -165,7 +167,7 @@ func (m *testMockProvider) Delete(ctx context.Context, r provider.Record) error 
 	// Remove from records
 	newRecords := make([]provider.Record, 0, len(m.records))
 	for _, rec := range m.records {
-		if rec.Hostname != r.Hostname || rec.Type != r.Type || rec.Target != r.Target {
+		if rec.Hostname != r.Hostname || !provider.SameRecordMember(rec, r) {
 			newRecords = append(newRecords, rec)
 		}
 	}

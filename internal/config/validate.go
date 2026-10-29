@@ -165,7 +165,7 @@ func validateTargetRecordType(inst *ProviderInstanceConfig) []*ConfigError {
 				prefix+"TARGET=host.example.com",
 			))
 		}
-	case provider.RecordTypeTXT, provider.RecordTypeSRV:
+	case provider.RecordTypeTXT, provider.RecordTypeSRV, provider.RecordTypeMX, provider.RecordTypeNS:
 		// Flexible targets, no validation needed
 	case provider.RecordTypeHTTPS:
 		// HTTPS records are managed automatically as companion records; no target validation needed

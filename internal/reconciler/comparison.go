@@ -167,6 +167,13 @@ func recordNeedsUpdate(existing, desired provider.Record, cmp provider.RecordCom
 		}
 	}
 
+	// For MX records, a changed preference is a change even at the same target
+	if existing.Type == provider.RecordTypeMX {
+		if !mxDataEquals(existing.MX, desired.MX) {
+			return true
+		}
+	}
+
 	return cmp != nil && cmp.RecordNeedsUpdate(existing, desired)
 }
 

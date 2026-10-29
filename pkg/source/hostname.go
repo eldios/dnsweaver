@@ -80,12 +80,14 @@ func (e *HostnameValidationError) Unwrap() error {
 	return e.Err
 }
 
-// ValidateHostname validates a hostname according to RFC 1123.
+// ValidateHostname validates a DNS owner name using RFC 1123 label rules,
+// with optional leading underscores for attribute labels (RFC 8552).
 //
 // Rules:
 //   - Total length <= 253 characters
 //   - Each label (dot-separated part) <= 63 characters
-//   - Labels must start and end with alphanumeric (a-z, A-Z, 0-9)
+//   - Each label may have one leading underscore (RFC 8552)
+//   - The rest must start and end with alphanumeric (a-z, A-Z, 0-9)
 //   - Labels can contain hyphens in the middle
 //   - No empty labels (no ".." or leading/trailing dots after normalization)
 //   - Case insensitive (validation accepts both upper and lower case)
@@ -126,6 +128,14 @@ func ValidateHostname(hostname string) error {
 		// Special case: wildcard in first label
 		if i == 0 && label == "*" {
 			continue
+		}
+
+		// An underscored label scopes an attribute rather than naming a host
+		// (RFC 8552): _dmarc, _domainkey, _acme-challenge, _matrix._tcp. The
+		// rest of the label follows the ordinary rules.
+		label = strings.TrimPrefix(label, "_")
+		if label == "" {
+			return &HostnameValidationError{Hostname: hostname, Label: label, Err: ErrLabelEmpty}
 		}
 
 		// Validate label format
@@ -243,17 +253,23 @@ type SRVHints struct {
 	Port     uint16 // TCP/UDP port number (1-65535)
 }
 
+// MXHints contains MX record-specific hints from source labels.
+type MXHints struct {
+	Preference uint16 // Lower values are tried first (0-65535)
+}
+
 // RecordHints contains optional hints for DNS record creation.
 // These allow sources (particularly native dnsweaver labels) to specify
 // record details that override provider defaults.
 //
 // All fields are optional - nil/zero values mean "use provider defaults".
 type RecordHints struct {
-	// Type overrides the record type (A, AAAA, CNAME, SRV, PTR, TXT).
+	// Type overrides the record type (A, AAAA, CNAME, SRV, MX, NS, PTR, TXT).
 	// Empty means use provider default.
 	Type string
 
-	// Target overrides the record target (IP for A/AAAA, hostname for CNAME/SRV).
+	// Target overrides the record target (IP for A/AAAA, hostname for
+	// CNAME/SRV/MX/NS).
 	// Empty means use provider default.
 	Target string
 
@@ -272,6 +288,9 @@ type RecordHints struct {
 
 	// SRV contains SRV-specific fields when Type is "SRV".
 	SRV *SRVHints
+
+	// MX contains MX-specific fields when Type is "MX".
+	MX *MXHints
 
 	// Metadata carries arbitrary key-value pairs from source labels to providers.
 	// Keys like "proxied" are actionable (trigger provider behavior).

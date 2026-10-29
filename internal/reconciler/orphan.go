@@ -359,7 +359,7 @@ func (r *Reconciler) deleteManagedForProvider(ctx context.Context, hostname stri
 		for _, rec := range allRecords {
 			if source.NormalizeHostname(rec.Hostname) == hostname {
 				switch rec.Type {
-				case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeSRV, provider.RecordTypeHTTPS:
+				case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeSRV, provider.RecordTypeHTTPS, provider.RecordTypeMX, provider.RecordTypeNS:
 					recordsToDelete = append(recordsToDelete, rec)
 				case provider.RecordTypeTXT:
 					// Skip TXT records (ownership markers handled separately)
@@ -602,7 +602,7 @@ func (r *Reconciler) deleteCacheOnlyForProvider(ctx context.Context, hostname st
 		for _, rec := range allRecords {
 			if source.NormalizeHostname(rec.Hostname) == hostname {
 				switch rec.Type {
-				case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeSRV, provider.RecordTypeHTTPS:
+				case provider.RecordTypeA, provider.RecordTypeAAAA, provider.RecordTypeCNAME, provider.RecordTypeSRV, provider.RecordTypeHTTPS, provider.RecordTypeMX, provider.RecordTypeNS:
 					recordsToDelete = append(recordsToDelete, rec)
 				case provider.RecordTypeTXT:
 					// Skip TXT records
