@@ -77,3 +77,44 @@ func TestRegressionUnownedTXTPreserved(t *testing.T) {
 		}
 	}
 }
+
+func TestRegressionMailRecordsShareOneHostname(t *testing.T) {
+	labels := map[string]string{}
+	declare := func(name, recordType, target, priority string) {
+		labels["dnsweaver.records."+name+".hostname"] = "mail.example.com"
+		labels["dnsweaver.records."+name+".type"] = recordType
+		labels["dnsweaver.records."+name+".target"] = target
+		if priority != "" {
+			labels["dnsweaver.records."+name+".priority"] = priority
+		}
+	}
+	declare("mx1", "MX", "mx1.example.net", "10")
+	declare("mx2", "MX", "mx2.example.net", "20")
+	declare("spf", "TXT", "v=spf1 include:example.net -all", "")
+	declare("verify", "TXT", "verification=regression", "")
+	w := workload.Workload{ID: "mail", Name: "mail", Platform: workload.PlatformDocker, Labels: labels}
+	h, err := native.New().Extract(context.Background(), w)
+	if err != nil || len(h) != 4 {
+		t.Fatalf("real source: %v %v", h, err)
+	}
+
+	caps := setTestCapabilities(true, false)
+	caps.SupportedRecordTypes = append(caps.SupportedRecordTypes, provider.RecordTypeMX)
+	r, _, _ := liveSetHarness(t, caps, newTestMockSource("dnsweaver", h...), []workload.Workload{w})
+	first, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := first.Created(); len(got) != 4 {
+		t.Fatalf("created = %+v, want both MX and both TXT members", first.Actions)
+	}
+	second, err := r.Reconcile(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range second.Actions {
+		if a.Type != ActionSkip {
+			t.Errorf("unchanged mail records caused a write: %+v", a)
+		}
+	}
+}

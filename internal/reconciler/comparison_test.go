@@ -239,6 +239,95 @@ func TestCompareRecordSets_SRVPriorityChange(t *testing.T) {
 	}
 }
 
+func TestRecordNeedsUpdate_MXPreference(t *testing.T) {
+	mxRecord := func(preference uint16, ttl int) provider.Record {
+		return provider.Record{
+			Hostname: "example.com",
+			Type:     provider.RecordTypeMX,
+			Target:   "mail.protonmail.ch",
+			TTL:      ttl,
+			MX:       &provider.MXData{Preference: preference},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		existing provider.Record
+		desired  provider.Record
+		want     bool
+	}{
+		{
+			name:     "identical MX records need no update",
+			existing: mxRecord(10, 3600),
+			desired:  mxRecord(10, 3600),
+			want:     false,
+		},
+		{
+			name:     "changed preference needs an update",
+			existing: mxRecord(10, 3600),
+			desired:  mxRecord(20, 3600),
+			want:     true,
+		},
+		{
+			name:     "changed TTL needs an update",
+			existing: mxRecord(10, 3600),
+			desired:  mxRecord(10, 300),
+			want:     true,
+		},
+		{
+			name:     "missing MX data on one side needs an update",
+			existing: provider.Record{Hostname: "example.com", Type: provider.RecordTypeMX, Target: "mail.protonmail.ch", TTL: 3600},
+			desired:  mxRecord(10, 3600),
+			want:     true,
+		},
+		{
+			name:     "NS records compare on the generic fields only",
+			existing: provider.Record{Hostname: "sub.example.com", Type: provider.RecordTypeNS, Target: "ns1.example.net", TTL: 3600},
+			desired:  provider.Record{Hostname: "sub.example.com", Type: provider.RecordTypeNS, Target: "ns1.example.net", TTL: 3600},
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := recordNeedsUpdate(tt.existing, tt.desired, nil); got != tt.want {
+				t.Errorf("recordNeedsUpdate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompareRecordSets_MXPreferenceChange(t *testing.T) {
+	existing := []provider.Record{{
+		Hostname: "example.com",
+		Type:     provider.RecordTypeMX,
+		Target:   "mail.protonmail.ch",
+		TTL:      3600,
+		MX:       &provider.MXData{Preference: 10},
+	}}
+	desired := []provider.Record{{
+		Hostname: "example.com",
+		Type:     provider.RecordTypeMX,
+		Target:   "mail.protonmail.ch",
+		TTL:      3600,
+		MX:       &provider.MXData{Preference: 20},
+	}}
+
+	diff := CompareRecordSets(existing, desired)
+
+	// Same hostname, type and target, so the record is rewritten in place
+	// rather than deleted and recreated the way a changed SRV would be.
+	if len(diff.ToUpdate) != 1 {
+		t.Fatalf("expected 1 ToUpdate, got %d", len(diff.ToUpdate))
+	}
+	if len(diff.ToCreate) != 0 || len(diff.ToDelete) != 0 {
+		t.Errorf("expected no create/delete, got %d create and %d delete", len(diff.ToCreate), len(diff.ToDelete))
+	}
+	if diff.ToUpdate[0].Desired.MX.Preference != 20 {
+		t.Errorf("desired preference = %d, want 20", diff.ToUpdate[0].Desired.MX.Preference)
+	}
+}
+
 func TestCompareForHostname_FiltersCorrectly(t *testing.T) {
 	existing := []provider.Record{
 		{Hostname: "app.example.com", Type: provider.RecordTypeA, Target: "10.0.0.1", TTL: 300},

@@ -115,7 +115,7 @@ dnsweaver supports multiple DNS providers, each with different capabilities and 
 | Provider | API Type | Record Types | Best For |
 | :------- | :------- | :----------- | :------- |
 | [Technitium](technitium.md) | REST API | A, AAAA, CNAME, SRV, TXT | Self-hosted, full-featured DNS |
-| [Cloudflare](cloudflare.md) | REST API | A, AAAA, CNAME, SRV, TXT | Public DNS with CDN/proxy |
+| [Cloudflare](cloudflare.md) | REST API | A, AAAA, CNAME, SRV, MX, NS, TXT | Public DNS with CDN/proxy |
 | [OVHcloud](ovh.md) | REST API | A, AAAA, CNAME, SRV, TXT | Public DNS for OVH-hosted domains |
 | [RFC 2136](rfc2136.md) | DNS Protocol | A, AAAA, CNAME, SRV, TXT | BIND, Windows DNS, PowerDNS, Knot |
 | [PowerDNS](powerdns.md) | REST API | A, AAAA, CNAME, SRV, TXT | PowerDNS via native HTTP API |

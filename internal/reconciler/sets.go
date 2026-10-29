@@ -82,6 +82,7 @@ func (r *Reconciler) reconcileDesiredSetWithState(ctx context.Context, set *desi
 
 	matchedExisting := make([]bool, len(sameType))
 	_, hasLegacyOwnership := cache.legacyOwnershipRecord(instance.Name(), set.Key.Hostname, instance.InstanceID)
+	hasLegacyOwnership = hasLegacyOwnership && legacyOwnershipCovers(set.Key.RecordType)
 	legacyUpgradeComplete := hasLegacyOwnership && instance.Provider.Capabilities().SupportsOwnershipTXT && set.Key.RecordType != provider.RecordTypeTXT
 	desiredWritesSucceeded := true
 
@@ -109,7 +110,7 @@ func (r *Reconciler) reconcileDesiredSetWithState(ctx context.Context, set *desi
 				actions = append(actions, action)
 				continue
 			}
-			if err := instance.CreateRecordWithValues(ctx, record.Hostname, record.Type, record.Target, record.TTL, record.SRV, record.Metadata); err != nil {
+			if err := instance.CreateRecordWithValues(ctx, record.Hostname, record.Type, record.Target, record.TTL, record.SRV, record.MX, record.Metadata); err != nil {
 				action.Status = StatusFailed
 				action.Error = err.Error()
 				legacyUpgradeComplete = false
@@ -508,4 +509,11 @@ func recordMemberPresent(records []provider.Record, record provider.Record) bool
 		}
 	}
 	return false
+}
+
+// legacyOwnershipCovers reports whether a hostname-level marker written before
+// member ownership can vouch for a record of this type. Those releases never
+// managed MX or NS, so their markers grant no authority over such records.
+func legacyOwnershipCovers(recordType provider.RecordType) bool {
+	return recordType != provider.RecordTypeMX && recordType != provider.RecordTypeNS
 }
