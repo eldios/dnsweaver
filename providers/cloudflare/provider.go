@@ -403,8 +403,15 @@ func (p *Provider) ListOwnershipState(ctx context.Context) ([]provider.Record, e
 // so data TXT is compared on its decoded strings. Content that is not a
 // well-formed sequence of quoted strings is kept as listed.
 func listedTXTContent(name, value string) (string, error) {
-	if provider.IsOwnershipStateRecord(name) || provider.IsOwnershipRecord(name) {
+	if provider.IsOwnershipStateRecord(name) {
 		return compactTXTContent(name, value)
+	}
+	if provider.IsOwnershipRecord(name) {
+		content, err := compactTXTContent(name, value)
+		if err != nil {
+			return "", err
+		}
+		return provider.MapMemberOwnershipTXTTarget(content, provider.TXTPayload), nil
 	}
 	if decoded, ok := provider.DecodeTXTStrings(value); ok {
 		return decoded, nil
@@ -416,11 +423,21 @@ func listedTXTContent(name, value string) (string, error) {
 // listedTXTContent reads back the same data: Cloudflare takes a value that
 // starts with a quote as presentation text, so such data is sent quoted.
 func apiContent(record provider.Record) string {
-	if record.Type != provider.RecordTypeTXT || provider.IsOwnershipRecord(record.Hostname) || provider.IsOwnershipStateRecord(record.Hostname) {
+	switch {
+	case record.Type != provider.RecordTypeTXT || provider.IsOwnershipStateRecord(record.Hostname):
 		return record.Target
+	case provider.IsOwnershipRecord(record.Hostname):
+		// Member markers keep a TXT target in the same presentation form as the
+		// declared content, which is also how earlier releases recorded it.
+		return provider.MapMemberOwnershipTXTTarget(record.Target, provider.TXTPresentation)
+	default:
+		return provider.TXTPresentation(record.Target)
 	}
-	return provider.TXTPresentation(record.Target)
 }
+
+// TXTPresentationText implements provider.TXTPresentationText: Cloudflare
+// stores TXT content as quoted presentation text.
+func (p *Provider) TXTPresentationText() {}
 
 // Cloudflare can return one TXT RR as quoted wire strings. Compact payloads
 // concatenate those strings; unrelated user TXT retains its existing meaning.
@@ -698,6 +715,9 @@ var _ provider.Updater = (*Provider)(nil)
 
 // Ensure Provider implements provider.RecordComparer at compile time.
 var _ provider.RecordComparer = (*Provider)(nil)
+
+// Ensure Provider implements provider.TXTPresentationText at compile time.
+var _ provider.TXTPresentationText = (*Provider)(nil)
 
 // resolveProxied determines the effective proxied state for a record and
 // warns when a requested proxy is refused. Priority order:

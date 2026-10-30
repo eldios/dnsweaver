@@ -1514,3 +1514,24 @@ func TestCloudflareRecordMatches_TXTDataContainingQuotes(t *testing.T) {
 		t.Errorf("apiContent(%q) = %q, want quoted presentation", quotedData.Target, got)
 	}
 }
+
+func TestTXTMemberMarkerPresentation(t *testing.T) {
+	member := provider.Record{Hostname: "example.com", Type: provider.RecordTypeTXT, Target: `"hello"`}
+	marker := provider.MemberOwnershipRecord(member.Hostname, 300, "x", member, nil)
+
+	written := apiContent(marker)
+	if !provider.MatchesMemberOwnership(written, "x", provider.Record{Type: provider.RecordTypeTXT, Target: `"\"hello\""`}) {
+		t.Fatalf("written marker %q does not record the presentation text", written)
+	}
+	listed, err := listedTXTContent(marker.Hostname, written)
+	if err != nil || listed != marker.Target {
+		t.Fatalf("listed marker = %q, %v; want %q", listed, err, marker.Target)
+	}
+	// Earlier releases recorded the declared spelling, which on Cloudflare is
+	// presentation text of the data.
+	legacy := provider.MakeMemberOwnershipValue("x", provider.Record{Type: provider.RecordTypeTXT, Target: `"v=spf1 -all"`}, nil)
+	listed, err = listedTXTContent(marker.Hostname, legacy)
+	if err != nil || !provider.MatchesMemberOwnership(listed, "x", provider.Record{Type: provider.RecordTypeTXT, Target: "v=spf1 -all"}) {
+		t.Fatalf("legacy marker listed as %q, %v; want ownership of v=spf1 -all", listed, err)
+	}
+}

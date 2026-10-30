@@ -44,10 +44,26 @@ func DecodeTXTStrings(value string) (string, bool) {
 	return content.String(), true
 }
 
-// TXTPayload returns the character data a declared TXT value stands for. A
-// value written in quoted presentation, such as `"v=spf1 -all"` or
+// TXTPresentationText is implemented by providers whose API stores TXT
+// content as presentation text, so a declared value such as `"v=spf1 -all"`
+// is quoted presentation of the data v=spf1 -all. For those providers TXT
+// Record.Target holds the decoded data, and the provider converts it at its
+// API boundary. Other providers store declared TXT values verbatim.
+type TXTPresentationText interface {
+	TXTPresentationText()
+}
+
+// DeclaredTXT returns the TXT Record.Target a declared value stands for on p.
+func DeclaredTXT(p Provider, value string) string {
+	if _, ok := p.(TXTPresentationText); ok {
+		return TXTPayload(value)
+	}
+	return value
+}
+
+// TXTPayload returns the character data a TXT value in presentation text
+// stands for. A value written as quoted strings, such as `"v=spf1 -all"` or
 // `"\"hello\""`, is decoded once; any other value already is the data.
-// Record.Target holds TXT data in this decoded form throughout dnsweaver.
 func TXTPayload(value string) string {
 	if decoded, ok := DecodeTXTStrings(value); ok {
 		return decoded
@@ -69,4 +85,26 @@ func TXTPresentation(payload string) string {
 		payload = payload[255:]
 	}
 	return strings.Join(append(parts, strconv.Quote(payload)), " ")
+}
+
+// MapMemberOwnershipTXTTarget returns the member marker value with the target
+// of a TXT member replaced by f(target). Any other value, and a TXT marker
+// whose target f leaves unchanged, is returned as given. Providers that
+// implement TXTPresentationText use it to keep marker targets in the same
+// presentation form as the TXT content they store.
+func MapMemberOwnershipTXTTarget(value string, f func(string) string) string {
+	owned, instanceID, fields := ParseOwnershipValue(value)
+	if !owned || fields[keyRecordVersion] != memberOwnershipVersion || fields[keyRecordType] != string(RecordTypeTXT) {
+		return value
+	}
+	target, err := decodeOwnershipField(fields[keyRecordTarget])
+	if err != nil {
+		return value
+	}
+	mapped := f(target)
+	if mapped == target {
+		return value
+	}
+	fields[keyRecordTarget] = encodeOwnershipField(mapped)
+	return MakeOwnershipValue(instanceID, fields)
 }

@@ -1,9 +1,6 @@
 package provider
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestDecodeTXTStrings(t *testing.T) {
 	tests := []struct {
@@ -57,18 +54,40 @@ func TestTXTPayloadAndPresentation(t *testing.T) {
 	}
 }
 
-func TestMemberOwnership_TXTPayloadIsExact(t *testing.T) {
+func TestMapMemberOwnershipTXTTarget(t *testing.T) {
 	txt := func(target string) Record { return Record{Type: RecordTypeTXT, Target: target} }
-	quotedData := MakeMemberOwnershipValue("x", txt(`"hello"`), nil)
-	if MatchesMemberOwnership(quotedData, "x", txt("hello")) {
+	quotedData := MakeMemberOwnershipValue("x", txt(`"hello"`), map[string]string{"source": "native"})
+
+	presented := MapMemberOwnershipTXTTarget(quotedData, TXTPresentation)
+	if !MatchesMemberOwnership(presented, "x", txt(`"\"hello\""`)) {
+		t.Errorf("presented marker %q does not record the presentation text", presented)
+	}
+	if got := MapMemberOwnershipTXTTarget(presented, TXTPayload); got != quotedData {
+		t.Errorf("round trip = %q, want %q", got, quotedData)
+	}
+	plain := MakeMemberOwnershipValue("x", txt("v=spf1 -all"), nil)
+	if got := MapMemberOwnershipTXTTarget(plain, TXTPresentation); got != plain {
+		t.Errorf("unchanged target rewrote the marker: %q", got)
+	}
+	a := MakeMemberOwnershipValue("x", Record{Type: RecordTypeA, Target: "192.0.2.1"}, nil)
+	if got := MapMemberOwnershipTXTTarget(a, TXTPayload); got != a {
+		t.Errorf("A marker changed: %q", got)
+	}
+	// Without a provider mapping, a marker owns exactly the value it records.
+	if MatchesMemberOwnership(MakeMemberOwnershipValue("x", txt(`"hello"`), nil), "x", txt("hello")) {
 		t.Error("marker for the data \"hello\" matched the data hello")
 	}
-	if !MatchesMemberOwnership(quotedData, "x", txt(`"hello"`)) {
-		t.Error("marker did not match its own data")
+}
+
+func TestDeclaredTXT(t *testing.T) {
+	if got := DeclaredTXT(presentationProvider{}, `"\"hello\""`); got != `"hello"` {
+		t.Errorf("presentation provider: DeclaredTXT = %q, want %q", got, `"hello"`)
 	}
-	// Markers from before the payload flag recorded the declared spelling.
-	legacy := strings.Replace(MakeMemberOwnershipValue("x", txt(`"v=spf1 -all"`), nil), ",record-txt-payload=1", "", 1)
-	if !MatchesMemberOwnership(legacy, "x", txt("v=spf1 -all")) {
-		t.Error("legacy marker with a quoted declaration lost its record")
+	if got := DeclaredTXT(nil, `"hello"`); got != `"hello"` {
+		t.Errorf("verbatim provider: DeclaredTXT = %q, want the declared value", got)
 	}
 }
+
+type presentationProvider struct{ Provider }
+
+func (presentationProvider) TXTPresentationText() {}

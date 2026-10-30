@@ -173,8 +173,5 @@ func sameDeclaredMember(a, b *source.Hostname) bool {
 	if b.RecordHints.MX != nil {
 		recordB.MX = &provider.MXData{Preference: b.RecordHints.MX.Preference}
 	}
-	if recordA.Type == provider.RecordTypeTXT {
-		recordA.Target, recordB.Target = provider.TXTPayload(recordA.Target), provider.TXTPayload(recordB.Target)
-	}
 	return provider.SameRecordMember(recordA, recordB)
 }

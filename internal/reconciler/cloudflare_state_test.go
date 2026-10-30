@@ -519,13 +519,9 @@ func TestReconcile_CloudflareTXTKeepsOwnershipAcrossQuoting(t *testing.T) {
 			api := &fakeCloudflareAPI{quoteTXT: true}
 			member := provider.Record{Hostname: "mail.example.com", Type: provider.RecordTypeTXT, Target: `"v=spf1 -all"`}
 			api.add("TXT", member.Hostname, member.Target, 300, false)
-			// Earlier releases recorded the declared value and no payload flag.
+			// Earlier releases recorded the declared spelling as the marker target.
 			marker := provider.MemberOwnershipRecord(member.Hostname, 300, "", member, nil)
-			legacy := strings.Replace(marker.Target, ",record-txt-payload=1", "", 1)
-			if legacy == marker.Target {
-				t.Fatalf("marker %q carries no payload flag to strip", marker.Target)
-			}
-			api.add("TXT", marker.Hostname, legacy, 300, false)
+			api.add("TXT", marker.Hostname, marker.Target, 300, false)
 
 			r, lister := newCloudflareStateFixture(t, api, false, "203.0.113.10")
 			lister.AddWorkload("mail", map[string]string{
@@ -593,5 +589,32 @@ func TestReconcile_CloudflareTXTKeepsQuotedDataDistinct(t *testing.T) {
 	}
 	if got := api.txtContents("mail.example.com"); len(got) != 1 || got[0] != `"\"hello\""` {
 		t.Fatalf("TXT after withdrawing hello = %q, want only the manual record", got)
+	}
+}
+
+func TestReconcile_CloudflareQuotedTXTDataOwnershipSurvivesRestart(t *testing.T) {
+	// The marker is the only proof of ownership after a restart, so its target
+	// must round-trip quoted data through Cloudflare's presentation text.
+	api := &fakeCloudflareAPI{quoteTXT: true}
+	r, lister := newCloudflareStateFixture(t, api, false, "203.0.113.10")
+	lister.AddWorkload("app", map[string]string{
+		"dnsweaver.records.txt.hostname": "mail.example.com",
+		"dnsweaver.records.txt.type":     "TXT",
+		"dnsweaver.records.txt.target":   `"\"hello\""`,
+	})
+	if _, err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	lister.workloads = nil
+	restarted := New(r.listers, r.sources, r.providers, WithConfig(DefaultConfig()), WithLogger(quietLogger()))
+	if _, err := restarted.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile after restart: %v", err)
+	}
+	if got := api.txtContents("mail.example.com"); len(got) != 0 {
+		t.Fatalf("TXT after withdrawal across a restart = %q, want none", got)
+	}
+	if got := api.txtContents(provider.OwnershipRecordName("mail.example.com")); len(got) != 0 {
+		t.Fatalf("markers left behind = %q", got)
 	}
 }

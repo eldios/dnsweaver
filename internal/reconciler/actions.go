@@ -358,7 +358,7 @@ func (r *Reconciler) ensureRecordForProvider(ctx context.Context, hostname *sour
 	// cache-miss parity.
 	if recordType == provider.RecordTypeTXT || recordType == provider.RecordTypeMX || recordType == provider.RecordTypeNS {
 		if recordType == provider.RecordTypeTXT {
-			desired.Target = provider.TXTPayload(desired.Target)
+			desired.Target = provider.DeclaredTXT(inst.Provider, desired.Target)
 		}
 		if cache == nil || !cache.providerAvailable(inst.Name()) {
 			cache = newRecordCache(ctx, r.providers, r.logger)

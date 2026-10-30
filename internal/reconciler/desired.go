@@ -221,7 +221,7 @@ func desiredRecordForClaim(claim *source.Hostname, instance *provider.ProviderIn
 		}
 	}
 	if record.Type == provider.RecordTypeTXT {
-		record.Target = provider.TXTPayload(record.Target)
+		record.Target = provider.DeclaredTXT(instance.Provider, record.Target)
 	}
 	return record
 }

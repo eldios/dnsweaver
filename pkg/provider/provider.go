@@ -50,7 +50,6 @@ const (
 	keyRecordHTTPSTargetName = "record-https-target-name"
 	keyRecordHTTPSALPN       = "record-https-alpn"
 	keyRecordMXPreference    = "record-mx-preference"
-	keyRecordTXTPayload      = "record-txt-payload"
 )
 
 // MakeOwnershipValue returns the ownership TXT record value for the given instance ID and metadata.
@@ -174,9 +173,6 @@ func MakeMemberOwnershipValue(instanceID string, record Record, metadata map[str
 	if record.Type == RecordTypeMX && record.MX != nil {
 		fields[keyRecordMXPreference] = strconv.FormatUint(uint64(record.MX.Preference), 10)
 	}
-	if record.Type == RecordTypeTXT {
-		fields[keyRecordTXTPayload] = "1"
-	}
 
 	return MakeOwnershipValue(instanceID, fields)
 }
@@ -209,14 +205,8 @@ func ParseMemberOwnershipValue(value string) (isOwned bool, instanceID string, m
 
 	record := &Record{Type: recordType, Target: target}
 	switch recordType {
-	case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeNS:
+	case RecordTypeA, RecordTypeAAAA, RecordTypeCNAME, RecordTypeTXT, RecordTypeNS:
 		// Target fully identifies these member types.
-	case RecordTypeTXT:
-		// Markers written before TXT data was decoded recorded the declared
-		// value, which may be quoted presentation text.
-		if fields[keyRecordTXTPayload] != "1" {
-			record.Target = TXTPayload(target)
-		}
 	case RecordTypeSRV:
 		priority, priorityOK := parseOwnershipUint16(fields[keyRecordSRVPriority])
 		weight, weightOK := parseOwnershipUint16(fields[keyRecordSRVWeight])
@@ -356,7 +346,7 @@ func stripMemberOwnershipFields(fields map[string]string) map[string]string {
 		case keyRecordVersion, keyRecordType, keyRecordTarget,
 			keyRecordSRVPriority, keyRecordSRVWeight, keyRecordSRVPort,
 			keyRecordHTTPSPriority, keyRecordHTTPSTargetName, keyRecordHTTPSALPN,
-			keyRecordMXPreference, keyRecordTXTPayload:
+			keyRecordMXPreference:
 			continue
 		default:
 			metadata[key] = value
